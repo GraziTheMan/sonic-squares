@@ -10,10 +10,12 @@ import {
 } from "./scale.js";
 import { DRUMS, DRUM_ROWS, defaultDrumMap } from "./drums.js";
 import { AudioEngine } from "./audio.js";
-import { gridToMidi, downloadMidi } from "./midi.js";
+import { songToMidi, downloadMidi } from "./midi.js";
 
 const STORAGE_KEY = "tone-matrix-state";
-const HOLD_MS = 400; // press-and-hold this long to accent a cell
+const HOLD_MS = 400; // press-and-hold duration for accent / solo gestures
+const PATTERN_COUNT = 8;
+const PATTERN_NAMES = "ABCDEFGH";
 
 // Cell values: 0 = off, 1 = on, 2 = accented. Audio velocities per value:
 const VEL = { 1: 0.7, 2: 1.0 };
@@ -23,16 +25,25 @@ const VEL = { 1: 0.7, 2: 1.0 };
 const emptyGrid = (rows, fill = 0) =>
   Array.from({ length: rows }, () => Array(MAX_STEPS).fill(fill));
 
-let grid = emptyGrid(ROWS);
-let drumGrid = emptyGrid(DRUM_ROWS);
-// tieGrid[row][step] = true joins the melody note at `step` to `step + 1`.
-let tieGrid = emptyGrid(ROWS, false);
+const emptyPattern = () => ({
+  grid: emptyGrid(ROWS),
+  tieGrid: emptyGrid(ROWS, false),
+  drumGrid: emptyGrid(DRUM_ROWS),
+  length: 16,
+});
+
+let patterns = Array.from({ length: PATTERN_COUNT }, emptyPattern);
+let selectedPattern = 0;
+let songChain = []; // pattern indices played in order when song mode is on
+let songMode = false;
 let bpm = 120;
 let swing = 50; // percent, 50 = straight … 75 = heavy
 let rootIndex = 0;
 let scaleIndex = 0;
-let patternLength = 16;
 let drumMap = defaultDrumMap();
+let remapOnScaleChange = false;
+let mute = { melody: Array(ROWS).fill(false), drum: Array(DRUM_ROWS).fill(false) };
+let solo = { melody: Array(ROWS).fill(false), drum: Array(DRUM_ROWS).fill(false) };
 let rowNotes = buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
 
 let viewPage = 0;
@@ -40,8 +51,29 @@ let playingPage = 0;
 let follow = true;
 let tool = "draw"; // "draw" | "tie"
 
-const pageCount = () => patternLength / VIEW_COLS;
+// Scheduler-side song position (runs ahead of what you hear) and the
+// UI-side positions applied when the audio actually reaches them.
+let schedChainPos = 0;
+let uiPlayingPattern = 0;
+let uiChainPos = -1;
+
+const current = () => patterns[selectedPattern];
+const pageCount = () => current().length / VIEW_COLS;
 const stepOf = (col) => viewPage * VIEW_COLS + col;
+
+const playingPatternIndex = () =>
+  songMode && songChain.length
+    ? songChain[schedChainPos % songChain.length]
+    : selectedPattern;
+
+function patternIsEmpty(pat) {
+  return (
+    pat.grid.every((row) => row.every((v) => !v)) &&
+    pat.drumGrid.every((row) => row.every((v) => !v))
+  );
+}
+
+// ---- Persistence ----------------------------------------------------------
 
 const packGrid = (g) => g.map((row) => row.map((c) => +c).join("")).join("|");
 const unpackGrid = (s, rows) => {
@@ -55,33 +87,87 @@ const unpackGrid = (s, rows) => {
     return out;
   });
 };
+const unpackBoolGrid = (s, rows) => {
+  const g = unpackGrid(s, rows);
+  return g ? g.map((row) => row.map((v) => v === 1)) : null;
+};
 
 function saveState() {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      cells: packGrid(grid),
-      ties: packGrid(tieGrid),
-      drums: packGrid(drumGrid),
+      patterns: patterns.map((p) => ({
+        cells: packGrid(p.grid),
+        ties: packGrid(p.tieGrid),
+        drums: packGrid(p.drumGrid),
+        length: p.length,
+      })),
+      selectedPattern,
+      songChain,
+      songMode,
       bpm,
       swing,
       rootIndex,
       scaleIndex,
-      patternLength,
       drumMap,
+      remapOnScaleChange,
+      muteMelody: mute.melody,
+      muteDrum: mute.drum,
+      soloMelody: solo.melody,
+      soloDrum: solo.drum,
     })
   );
 }
+
+function loadPattern(saved) {
+  const pat = emptyPattern();
+  pat.grid = unpackGrid(saved.cells, ROWS) ?? pat.grid;
+  pat.tieGrid = unpackBoolGrid(saved.ties, ROWS) ?? pat.tieGrid;
+  pat.drumGrid = unpackGrid(saved.drums, DRUM_ROWS) ?? pat.drumGrid;
+  if (PATTERN_LENGTHS.includes(saved.length)) pat.length = saved.length;
+  return pat;
+}
+
+const boolArray = (v, len) =>
+  Array.isArray(v) && v.length === len && v.every((x) => typeof x === "boolean")
+    ? v
+    : null;
 
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    grid = unpackGrid(data.cells, ROWS) ?? grid;
-    drumGrid = unpackGrid(data.drums, DRUM_ROWS) ?? drumGrid;
-    const ties = unpackGrid(data.ties, ROWS);
-    if (ties) tieGrid = ties.map((row) => row.map((v) => v === 1));
+
+    if (Array.isArray(data.patterns)) {
+      for (let i = 0; i < Math.min(data.patterns.length, PATTERN_COUNT); i++) {
+        patterns[i] = loadPattern(data.patterns[i]);
+      }
+      if (data.selectedPattern >= 0 && data.selectedPattern < PATTERN_COUNT) {
+        selectedPattern = data.selectedPattern;
+      }
+      if (
+        Array.isArray(data.songChain) &&
+        data.songChain.every((i) => Number.isInteger(i) && i >= 0 && i < PATTERN_COUNT)
+      ) {
+        songChain = data.songChain;
+      }
+      songMode = data.songMode === true;
+      mute.melody = boolArray(data.muteMelody, ROWS) ?? mute.melody;
+      mute.drum = boolArray(data.muteDrum, DRUM_ROWS) ?? mute.drum;
+      solo.melody = boolArray(data.soloMelody, ROWS) ?? solo.melody;
+      solo.drum = boolArray(data.soloDrum, DRUM_ROWS) ?? solo.drum;
+      remapOnScaleChange = data.remapOnScaleChange === true;
+    } else if (data.cells) {
+      // Older single-pattern format: migrate into slot A.
+      patterns[0] = loadPattern({
+        cells: data.cells,
+        ties: data.ties,
+        drums: data.drums,
+        length: data.patternLength,
+      });
+    }
+
     if (data.bpm >= 40 && data.bpm <= 240) bpm = data.bpm;
     if (data.swing >= 50 && data.swing <= 75) swing = data.swing;
     if (data.rootIndex >= 0 && data.rootIndex < ROOT_CHOICES.length) {
@@ -89,9 +175,6 @@ function loadState() {
     }
     if (data.scaleIndex >= 0 && data.scaleIndex < SCALES.length) {
       scaleIndex = data.scaleIndex;
-    }
-    if (PATTERN_LENGTHS.includes(data.patternLength)) {
-      patternLength = data.patternLength;
     }
     if (
       Array.isArray(data.drumMap) &&
@@ -106,45 +189,70 @@ function loadState() {
   }
 }
 
+// ---- Mute / solo ----------------------------------------------------------
+
+function soloActive() {
+  return solo.melody.some(Boolean) || solo.drum.some(Boolean);
+}
+
+function rowAudible(kind, row) {
+  if (soloActive()) return solo[kind][row];
+  return !mute[kind][row];
+}
+
 // ---- Audio ----------------------------------------------------------------
 
 const engine = new AudioEngine({
-  onStep: (step, when) => stepQueue.push({ step, when }),
+  onStep: (step, when) =>
+    stepQueue.push({
+      step,
+      when,
+      pattern: playingPatternIndex(),
+      chainPos: songMode && songChain.length ? schedChainPos % songChain.length : -1,
+    }),
 });
+engine.getPatternLength = () => patterns[playingPatternIndex()].length;
+engine.onLoop = () => {
+  if (songMode && songChain.length) {
+    schedChainPos = (schedChainPos + 1) % songChain.length;
+  }
+};
 
 // Length of the note starting at `step` in 16ths (1 when untied).
-function noteLength(row, step) {
+function noteLength(pat, row, step) {
   let end = step;
-  while (end < patternLength - 1 && tieGrid[row][end] && grid[row][end + 1]) end++;
+  while (end < pat.length - 1 && pat.tieGrid[row][end] && pat.grid[row][end + 1]) end++;
   return end - step + 1;
 }
 
 // A step is a note START unless it continues a tie from the previous step.
-function isNoteStart(row, step) {
+function isNoteStart(pat, row, step) {
   return (
-    grid[row][step] > 0 &&
-    !(step > 0 && tieGrid[row][step - 1] && grid[row][step - 1] > 0)
+    pat.grid[row][step] > 0 &&
+    !(step > 0 && pat.tieGrid[row][step - 1] && pat.grid[row][step - 1] > 0)
   );
 }
 
 engine.getNotesForStep = (step) => {
+  const pat = patterns[playingPatternIndex()];
   const notes = [];
   for (let row = 0; row < ROWS; row++) {
-    if (isNoteStart(row, step)) {
+    if (rowAudible("melody", row) && isNoteStart(pat, row, step)) {
       notes.push({
         midi: rowNotes[row],
-        velocity: VEL[grid[row][step]],
-        durSteps: noteLength(row, step),
+        velocity: VEL[pat.grid[row][step]],
+        durSteps: noteLength(pat, row, step),
       });
     }
   }
   return notes;
 };
 engine.getDrumsForStep = (step) => {
+  const pat = patterns[playingPatternIndex()];
   const hits = [];
   for (let row = 0; row < DRUM_ROWS; row++) {
-    if (drumGrid[row][step]) {
-      hits.push({ id: DRUMS[row].id, velocity: VEL[drumGrid[row][step]] });
+    if (rowAudible("drum", row) && pat.drumGrid[row][step]) {
+      hits.push({ id: DRUMS[row].id, velocity: VEL[pat.drumGrid[row][step]] });
     }
   }
   return hits;
@@ -154,7 +262,18 @@ engine.getDrumsForStep = (step) => {
 
 function buildGridUI(el, rows, kind, labelFor) {
   const cells = [];
+  const heads = [];
   for (let row = 0; row < rows; row++) {
+    const head = document.createElement("button");
+    head.className = "row-head";
+    head.dataset.kind = kind;
+    head.dataset.row = row;
+    head.title = `${labelFor(row)} — tap to mute, hold to solo`;
+    head.setAttribute("aria-label", `Mute or solo ${labelFor(row)}`);
+    attachRowHeadGestures(head, kind, row);
+    el.appendChild(head);
+    heads.push(head);
+
     cells.push([]);
     for (let col = 0; col < VIEW_COLS; col++) {
       const cell = document.createElement("button");
@@ -168,45 +287,90 @@ function buildGridUI(el, rows, kind, labelFor) {
       cells[row].push(cell);
     }
   }
-  return cells;
+  return { cells, heads };
 }
 
-const cellEls = buildGridUI(
+function attachRowHeadGestures(head, kind, row) {
+  head.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let held = false;
+    const timer = setTimeout(() => {
+      held = true;
+      solo[kind][row] = !solo[kind][row];
+      renderRowHeads();
+      renderView();
+      saveState();
+    }, HOLD_MS);
+    window.addEventListener(
+      "pointerup",
+      () => {
+        clearTimeout(timer);
+        if (!held) {
+          mute[kind][row] = !mute[kind][row];
+          renderRowHeads();
+          renderView();
+          saveState();
+        }
+      },
+      { once: true }
+    );
+  });
+}
+
+const melodyUI = buildGridUI(
   document.getElementById("grid"),
   ROWS,
   "melody",
   (row) => midiNoteName(rowNotes[row])
 );
-const drumCellEls = buildGridUI(
+const drumUI = buildGridUI(
   document.getElementById("drum-grid"),
   DRUM_ROWS,
   "drum",
   (row) => DRUMS[row].label
 );
 
-const gridFor = (kind) => (kind === "drum" ? drumGrid : grid);
+const cellEls = melodyUI.cells;
+const drumCellEls = drumUI.cells;
+
+const gridDataFor = (kind) => (kind === "drum" ? current().drumGrid : current().grid);
 const cellsFor = (kind) => (kind === "drum" ? drumCellEls : cellEls);
+const headsFor = (kind) => (kind === "drum" ? drumUI.heads : melodyUI.heads);
+
+function renderRowHeads() {
+  for (const kind of ["melody", "drum"]) {
+    const heads = headsFor(kind);
+    for (let row = 0; row < heads.length; row++) {
+      heads[row].classList.toggle("muted", mute[kind][row]);
+      heads[row].classList.toggle("solo", solo[kind][row]);
+    }
+  }
+}
 
 // Re-render every visible cell for the current page (cheap: ~320 nodes).
 function renderView() {
+  const pat = current();
   for (const kind of ["melody", "drum"]) {
-    const g = gridFor(kind);
+    const g = gridDataFor(kind);
     const cells = cellsFor(kind);
     for (let row = 0; row < cells.length; row++) {
+      const dim = !rowAudible(kind, row);
       for (let col = 0; col < VIEW_COLS; col++) {
         const step = stepOf(col);
         const el = cells[row][col];
         const value = g[row][step];
         el.classList.toggle("on", value > 0);
         el.classList.toggle("accent", value === 2);
+        el.classList.toggle("row-muted", dim);
         if (kind === "melody") {
           const tiedRight =
             value > 0 &&
-            tieGrid[row][step] &&
-            step + 1 < patternLength &&
+            pat.tieGrid[row][step] &&
+            step + 1 < pat.length &&
             g[row][step + 1] > 0;
           const tiedLeft =
-            value > 0 && step > 0 && tieGrid[row][step - 1] && g[row][step - 1] > 0;
+            value > 0 && step > 0 && pat.tieGrid[row][step - 1] && g[row][step - 1] > 0;
           el.classList.toggle("tie-right", tiedRight);
           el.classList.toggle("tie-left", tiedLeft);
         }
@@ -217,15 +381,18 @@ function renderView() {
 
 function refreshMelodyTooltips() {
   for (let row = 0; row < ROWS; row++) {
-    for (const cell of cellEls[row]) cell.title = midiNoteName(rowNotes[row]);
+    const name = midiNoteName(rowNotes[row]);
+    for (const cell of cellEls[row]) cell.title = name;
+    melodyUI.heads[row].title = `${name} — tap to mute, hold to solo`;
   }
 }
 
 function previewCell(kind, row, step) {
+  const pat = current();
   if (kind === "drum") {
-    engine.previewDrum(DRUMS[row].id, VEL[drumGrid[row][step]]);
+    engine.previewDrum(DRUMS[row].id, VEL[pat.drumGrid[row][step]]);
   } else {
-    engine.preview(rowNotes[row], VEL[grid[row][step]], noteLength(row, step));
+    engine.preview(rowNotes[row], VEL[pat.grid[row][step]], noteLength(pat, row, step));
   }
 }
 
@@ -260,20 +427,22 @@ function cancelHold() {
 }
 
 function applyTie(row, step, wantTie) {
-  if (step >= patternLength - 1) return;
-  if (wantTie && !(grid[row][step] && grid[row][step + 1])) return;
-  if (tieGrid[row][step] === wantTie) return;
-  tieGrid[row][step] = wantTie;
+  const pat = current();
+  if (step >= pat.length - 1) return;
+  if (wantTie && !(pat.grid[row][step] && pat.grid[row][step + 1])) return;
+  if (pat.tieGrid[row][step] === wantTie) return;
+  pat.tieGrid[row][step] = wantTie;
   renderView();
   if (wantTie) previewCell("melody", row, step);
   saveState();
 }
 
 function applyDraw(info, value) {
-  const g = gridFor(info.kind);
+  const g = gridDataFor(info.kind);
   if (!!g[info.row][info.step] === !!value) return;
   g[info.row][info.step] = value;
   renderView();
+  renderPatternSlots();
   if (value) previewCell(info.kind, info.row, info.step);
   saveState();
 }
@@ -287,14 +456,14 @@ function onPointerDown(e) {
 
   if (tool === "tie") {
     if (info.kind !== "melody") return;
-    paintMode = tieGrid[info.row][info.step] ? "untie" : "tie";
+    paintMode = current().tieGrid[info.row][info.step] ? "untie" : "tie";
     applyTie(info.row, info.step, paintMode === "tie");
     return;
   }
 
-  const g = gridFor(info.kind);
-  const current = g[info.row][info.step];
-  if (current > 0) {
+  const g = gridDataFor(info.kind);
+  const value = g[info.row][info.step];
+  if (value > 0) {
     // Defer the toggle-off; a hold accents instead.
     paintMode = "erase";
     pendingOff = info;
@@ -302,7 +471,7 @@ function onPointerDown(e) {
       holdTimer = null;
       pendingOff = null;
       painting = false;
-      g[info.row][info.step] = current === 2 ? 1 : 2;
+      g[info.row][info.step] = value === 2 ? 1 : 2;
       renderView();
       previewCell(info.kind, info.row, info.step);
       saveState();
@@ -370,14 +539,27 @@ function draw() {
     while (stepQueue.length && stepQueue[0].when <= now) {
       next = stepQueue.shift();
     }
-    if (next && next.step !== drawnStep) {
+    if (next) {
       drawnStep = next.step;
+      uiPlayingPattern = next.pattern;
+      if (next.chainPos !== uiChainPos) {
+        uiChainPos = next.chainPos;
+        renderSongChain();
+      }
       const page = Math.floor(next.step / VIEW_COLS);
       if (page !== playingPage) {
         playingPage = page;
         updatePageTabs();
-        if (follow && viewPage !== page) setViewPage(page, { keepFollow: true });
       }
+      if (follow && engine.playing) {
+        if (uiPlayingPattern !== selectedPattern) {
+          selectPattern(uiPlayingPattern, { keepFollow: true });
+        }
+        if (viewPage !== page && page < pageCount()) {
+          setViewPage(page, { keepFollow: true });
+        }
+      }
+      renderPatternSlots();
       setPlayheadColumn(engine.playing ? next.step : -1);
     }
   }
@@ -385,10 +567,12 @@ function draw() {
 }
 
 function setPlayheadColumn(step) {
-  const col = step >= 0 ? step - viewPage * VIEW_COLS : -1;
+  // Playhead only shows when you're looking at the playing pattern.
+  const visible = step >= 0 && uiPlayingPattern === selectedPattern;
+  const col = visible ? step - viewPage * VIEW_COLS : -1;
   for (const kind of ["melody", "drum"]) {
     const cells = cellsFor(kind);
-    const g = gridFor(kind);
+    const g = gridDataFor(kind);
     for (let row = 0; row < cells.length; row++) {
       for (let c = 0; c < VIEW_COLS; c++) {
         const el = cells[row][c];
@@ -405,6 +589,94 @@ function setPlayheadColumn(step) {
 }
 
 requestAnimationFrame(draw);
+
+// ---- Patterns and song chain ----------------------------------------------
+
+const patternSlotsEl = document.getElementById("pattern-slots");
+const songChainEl = document.getElementById("song-chain");
+const songModeBtn = document.getElementById("song-mode");
+
+for (let i = 0; i < PATTERN_COUNT; i++) {
+  const slot = document.createElement("button");
+  slot.className = "slot";
+  slot.textContent = PATTERN_NAMES[i];
+  slot.addEventListener("click", () => selectPattern(i));
+  patternSlotsEl.appendChild(slot);
+}
+
+function renderPatternSlots() {
+  const slots = patternSlotsEl.children;
+  for (let i = 0; i < slots.length; i++) {
+    slots[i].classList.toggle("active", i === selectedPattern);
+    slots[i].classList.toggle("playing", engine.playing && i === uiPlayingPattern);
+    slots[i].classList.toggle("filled", !patternIsEmpty(patterns[i]));
+  }
+}
+
+function selectPattern(i, { keepFollow = false } = {}) {
+  if (i === selectedPattern) return;
+  selectedPattern = i;
+  if (!keepFollow && songMode) setFollow(false);
+  viewPage = 0;
+  lengthSelect.value = current().length;
+  rebuildPageTabs();
+  renderView();
+  renderPatternSlots();
+  setPlayheadColumn(engine.playing ? drawnStep : -1);
+  saveState();
+}
+
+function renderSongChain() {
+  songChainEl.replaceChildren();
+  for (const [pos, patIdx] of songChain.entries()) {
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.textContent = PATTERN_NAMES[patIdx];
+    chip.title = "Remove from song";
+    if (engine.playing && songMode && pos === uiChainPos) chip.classList.add("playing");
+    chip.addEventListener("click", () => {
+      songChain.splice(pos, 1);
+      renderSongChain();
+      saveState();
+    });
+    songChainEl.appendChild(chip);
+  }
+  if (!songChain.length) {
+    const empty = document.createElement("span");
+    empty.className = "chain-empty";
+    empty.textContent = "tap + to build a song from the selected pattern";
+    songChainEl.appendChild(empty);
+  }
+}
+
+document.getElementById("song-add").addEventListener("click", () => {
+  songChain.push(selectedPattern);
+  renderSongChain();
+  saveState();
+});
+
+function setSongMode(value) {
+  songMode = value;
+  songModeBtn.classList.toggle("active", songMode);
+  songModeBtn.setAttribute("aria-pressed", String(songMode));
+  schedChainPos = 0;
+  saveState();
+}
+
+songModeBtn.addEventListener("click", () => setSongMode(!songMode));
+
+document.getElementById("duplicate").addEventListener("click", () => {
+  const target = patterns.findIndex((p) => patternIsEmpty(p));
+  if (target === -1) return;
+  const src = current();
+  patterns[target] = {
+    grid: src.grid.map((r) => [...r]),
+    tieGrid: src.tieGrid.map((r) => [...r]),
+    drumGrid: src.drumGrid.map((r) => [...r]),
+    length: src.length,
+  };
+  selectPattern(target);
+});
 
 // ---- Pages ----------------------------------------------------------------
 
@@ -430,7 +702,10 @@ function updatePageTabs() {
   const tabs = pageTabsEl.children;
   for (let i = 0; i < tabs.length; i++) {
     tabs[i].classList.toggle("active", i === viewPage);
-    tabs[i].classList.toggle("playing", engine.playing && i === playingPage);
+    tabs[i].classList.toggle(
+      "playing",
+      engine.playing && i === playingPage && uiPlayingPattern === selectedPattern
+    );
   }
 }
 
@@ -462,6 +737,7 @@ const scaleSelect = document.getElementById("scale");
 const lengthSelect = document.getElementById("length");
 const toolDrawBtn = document.getElementById("tool-draw");
 const toolTieBtn = document.getElementById("tool-tie");
+const remapToggle = document.getElementById("remap-toggle");
 
 for (const [i, root] of ROOT_CHOICES.entries()) {
   const opt = document.createElement("option");
@@ -481,11 +757,15 @@ playBtn.addEventListener("click", () => {
     engine.stop();
     stepQueue.length = 0;
     drawnStep = -1;
+    uiChainPos = -1;
     setPlayheadColumn(-1);
     updatePageTabs();
+    renderPatternSlots();
+    renderSongChain();
     playBtn.textContent = "Play";
     playBtn.setAttribute("aria-pressed", "false");
   } else {
+    schedChainPos = 0;
     engine.start();
     playBtn.textContent = "Stop";
     playBtn.setAttribute("aria-pressed", "true");
@@ -506,8 +786,43 @@ swingInput.addEventListener("input", () => {
   saveState();
 });
 
+// Move every note in every pattern to the row whose new pitch is nearest its
+// old pitch, so melodies keep their sound (not just their shape) across
+// scale and root changes.
+function remapPatterns(oldNotes, newNotes) {
+  const nearestRow = (pitch) => {
+    let best = 0;
+    for (let r = 1; r < newNotes.length; r++) {
+      if (Math.abs(newNotes[r] - pitch) < Math.abs(newNotes[best] - pitch)) best = r;
+    }
+    return best;
+  };
+  const rowMap = oldNotes.map((pitch) => nearestRow(pitch));
+  for (const pat of patterns) {
+    const newGrid = emptyGrid(ROWS);
+    const newTies = emptyGrid(ROWS, false);
+    for (let row = 0; row < ROWS; row++) {
+      const nr = rowMap[row];
+      for (let step = 0; step < MAX_STEPS; step++) {
+        if (pat.grid[row][step]) {
+          newGrid[nr][step] = Math.max(newGrid[nr][step], pat.grid[row][step]);
+        }
+        if (pat.tieGrid[row][step]) newTies[nr][step] = true;
+      }
+    }
+    pat.grid = newGrid;
+    pat.tieGrid = newTies;
+  }
+}
+
 function applyScaleChange() {
+  const oldNotes = rowNotes;
   rowNotes = buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
+  if (remapOnScaleChange) {
+    remapPatterns(oldNotes, rowNotes);
+    renderView();
+    renderPatternSlots();
+  }
   refreshMelodyTooltips();
   saveState();
 }
@@ -522,9 +837,13 @@ scaleSelect.addEventListener("change", () => {
   applyScaleChange();
 });
 
+remapToggle.addEventListener("change", () => {
+  remapOnScaleChange = remapToggle.checked;
+  saveState();
+});
+
 lengthSelect.addEventListener("change", () => {
-  patternLength = +lengthSelect.value;
-  engine.patternLength = patternLength;
+  current().length = +lengthSelect.value;
   if (viewPage >= pageCount()) viewPage = 0;
   rebuildPageTabs();
   renderView();
@@ -544,23 +863,31 @@ toolDrawBtn.addEventListener("click", () => setTool("draw"));
 toolTieBtn.addEventListener("click", () => setTool("tie"));
 
 document.getElementById("clear").addEventListener("click", () => {
-  grid = emptyGrid(ROWS);
-  drumGrid = emptyGrid(DRUM_ROWS);
-  tieGrid = emptyGrid(ROWS, false);
+  const pat = current();
+  pat.grid = emptyGrid(ROWS);
+  pat.tieGrid = emptyGrid(ROWS, false);
+  pat.drumGrid = emptyGrid(DRUM_ROWS);
   renderView();
+  renderPatternSlots();
   saveState();
 });
 
 document.getElementById("export").addEventListener("click", () => {
-  const bytes = gridToMidi({
-    melodyGrid: grid,
-    tieGrid,
+  const chain =
+    songMode && songChain.length ? songChain.map((i) => patterns[i]) : [current()];
+  const bytes = songToMidi({
+    segments: chain.map((p) => ({
+      grid: p.grid,
+      tieGrid: p.tieGrid,
+      drumGrid: p.drumGrid,
+      steps: p.length,
+    })),
     rowNotes,
-    drumGrid,
     drumNotes: drumMap,
-    steps: patternLength,
     bpm,
     swing: swing / 100,
+    melodyAudible: Array.from({ length: ROWS }, (_, r) => rowAudible("melody", r)),
+    drumAudible: Array.from({ length: DRUM_ROWS }, (_, r) => rowAudible("drum", r)),
   });
   downloadMidi(bytes);
 });
@@ -618,17 +945,22 @@ document.getElementById("drum-map-reset").addEventListener("click", () => {
 loadState();
 engine.bpm = bpm;
 engine.swing = swing / 100;
-engine.patternLength = patternLength;
 bpmInput.value = bpm;
 bpmLabel.textContent = `${bpm} BPM`;
 swingInput.value = swing;
 swingLabel.textContent = `Swing ${swing}%`;
 rootSelect.value = rootIndex;
 scaleSelect.value = scaleIndex;
-lengthSelect.value = patternLength;
+lengthSelect.value = current().length;
+remapToggle.checked = remapOnScaleChange;
+songModeBtn.classList.toggle("active", songMode);
+songModeBtn.setAttribute("aria-pressed", String(songMode));
 setTool("draw");
 setFollow(true);
 refreshMelodyTooltips();
 rebuildPageTabs();
 renderView();
+renderRowHeads();
+renderPatternSlots();
+renderSongChain();
 renderDrumMap();

@@ -13,7 +13,12 @@ export class AudioEngine {
   constructor({ onStep }) {
     this.onStep = onStep; // (step, audioTime) => void, for UI sync
     this.bpm = 120;
-    this.patternLength = 16;
+    // Length of the pattern currently playing — a callback so the app can
+    // swap patterns (and lengths) mid-playback for song chaining.
+    this.getPatternLength = () => 16;
+    // Called after the playhead wraps to step 0; the app advances the song
+    // chain here.
+    this.onLoop = null;
     // Swing ratio: 0.5 = straight, up to 0.75 = heavy triplet swing. Offbeat
     // 16ths are delayed; the grid/playhead itself stays straight.
     this.swing = 0.5;
@@ -90,7 +95,11 @@ export class AudioEngine {
       }
       this.onStep(step, this.nextNoteTime);
       this.nextNoteTime += this.secondsPerStep();
-      this.currentStep = (this.currentStep + 1) % this.patternLength;
+      this.currentStep += 1;
+      if (this.currentStep >= this.getPatternLength()) {
+        this.currentStep = 0;
+        this.onLoop?.();
+      }
     }
   }
 

@@ -20,6 +20,16 @@ never got: **MIDI export**.
   runs of cells into single sustained notes — by choice, so repeated 16ths
   stay repeated unless you tie them. Tied notes sustain in the synth and
   export as one long MIDI note.
+- **Eight pattern slots (A–H)** with one-tap switching, a Duplicate button,
+  and a **song mode**: chain patterns in any order (tap + to append the
+  selected pattern, tap a chip to remove it) and the chain plays — and
+  exports — as one continuous piece.
+- **Per-row mute/solo** via the dot to the left of each row: tap to mute,
+  hold to solo. Muted rows dim in the grid and are left out of the export —
+  the file contains what you hear.
+- Optional **pitch-preserving scale changes** (Settings): when switching
+  scale or root, notes move to the row nearest their old pitch instead of
+  keeping their grid position, so the melody keeps its sound.
 - **Export MIDI** writes a Standard MIDI File (format 1) by hand: melody on
   channel 1, drums on channel 10, with a tempo meta event so the file opens
   at your BPM in any DAW. Downloads as `tone-matrix.mid`.
@@ -54,7 +64,8 @@ npm run build && npx cap sync && npx cap open android
 ## How MIDI export works
 
 Each active cell becomes a 16th note; tied melody cells merge into one longer
-note. Melody rows map to MIDI note numbers on the selected scale (bottom row
+note. In song mode the whole chain is written back to back as one continuous
+sequence. Melody rows map to MIDI note numbers on the selected scale (bottom row
 lowest); drum rows map to the configurable channel-10 note numbers. Accents
 export at velocity 118 (normal notes at 88), and swing shifts offbeat 16ths
 later by the same ratio the synth plays. The writer in `src/midi.js` emits an

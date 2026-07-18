@@ -5,9 +5,12 @@
 // The melody track leads with a tempo meta event so the file opens at the
 // composed BPM, not a DAW default.
 //
-// Cell values carry velocity: 1 = normal, 2 = accent. Melody cells joined by
-// ties export as one long note; untied neighbours stay separate 16ths.
-// Swing shifts offbeat 16ths later, matching what the audio engine plays.
+// Export takes a list of pattern segments played back to back, so a song
+// chain becomes one continuous file. Cell values carry velocity: 1 = normal,
+// 2 = accent. Melody cells joined by ties export as one long note; untied
+// neighbours stay separate 16ths. Swing shifts offbeat 16ths later, matching
+// what the audio engine plays. Muted rows are skipped — the file contains
+// what you hear.
 
 const PPQ = 128; // ticks per quarter note
 const TICKS_PER_STEP = PPQ / 4; // a step is a 16th note
@@ -23,14 +26,12 @@ function varLen(value) {
   return bytes;
 }
 
-function tickOf(step, swingTicks) {
-  return step * TICKS_PER_STEP + (step % 2 ? swingTicks : 0);
-}
-
 // Melody: walk each row merging tied runs into single long notes.
-function melodyEvents(grid, tieGrid, rowNotes, steps, swingTicks) {
-  const events = [];
+function melodySegmentEvents(seg, rowNotes, audible, swingTicks, offset, events) {
+  const { grid, tieGrid, steps } = seg;
+  const tickOf = (s) => offset + s * TICKS_PER_STEP + (s % 2 ? swingTicks : 0);
   for (let row = 0; row < grid.length; row++) {
+    if (!audible[row]) continue;
     let step = 0;
     while (step < steps) {
       if (!grid[row][step]) {
@@ -41,27 +42,27 @@ function melodyEvents(grid, tieGrid, rowNotes, steps, swingTicks) {
       while (end < steps - 1 && tieGrid[row][end] && grid[row][end + 1]) end++;
       const note = rowNotes[row];
       const velocity = VELOCITY[grid[row][step]] ?? VELOCITY[1];
-      events.push({ tick: tickOf(step, swingTicks), off: false, note, velocity, channel: 0 });
-      events.push({ tick: tickOf(end + 1, swingTicks), off: true, note, velocity: 0, channel: 0 });
+      events.push({ tick: tickOf(step), off: false, note, velocity, channel: 0 });
+      events.push({ tick: tickOf(end + 1), off: true, note, velocity: 0, channel: 0 });
       step = end + 1;
     }
   }
-  return sortEvents(events);
 }
 
 // Drums: every active cell is its own hit.
-function drumEvents(grid, drumNotes, steps, swingTicks) {
-  const events = [];
-  for (let row = 0; row < grid.length; row++) {
+function drumSegmentEvents(seg, drumNotes, audible, swingTicks, offset, events) {
+  const { drumGrid, steps } = seg;
+  const tickOf = (s) => offset + s * TICKS_PER_STEP + (s % 2 ? swingTicks : 0);
+  for (let row = 0; row < drumGrid.length; row++) {
+    if (!audible[row]) continue;
     for (let step = 0; step < steps; step++) {
-      if (!grid[row][step]) continue;
+      if (!drumGrid[row][step]) continue;
       const note = drumNotes[row];
-      const velocity = VELOCITY[grid[row][step]] ?? VELOCITY[1];
-      events.push({ tick: tickOf(step, swingTicks), off: false, note, velocity, channel: 9 });
-      events.push({ tick: tickOf(step + 1, swingTicks), off: true, note, velocity: 0, channel: 9 });
+      const velocity = VELOCITY[drumGrid[row][step]] ?? VELOCITY[1];
+      events.push({ tick: tickOf(step), off: false, note, velocity, channel: 9 });
+      events.push({ tick: tickOf(step + 1), off: true, note, velocity: 0, channel: 9 });
     }
   }
-  return sortEvents(events);
 }
 
 function sortEvents(events) {
@@ -74,7 +75,7 @@ function sortEvents(events) {
 
 // Delta-encode events into an MTrk chunk. `prefix` holds already-encoded
 // tick-zero events (tempo, program change).
-function trackChunk(events, steps, prefix = []) {
+function trackChunk(events, totalTicks, prefix = []) {
   const track = [...prefix];
   let lastTick = 0;
   for (const ev of events) {
@@ -82,8 +83,7 @@ function trackChunk(events, steps, prefix = []) {
     lastTick = ev.tick;
     track.push((ev.off ? 0x80 : 0x90) | ev.channel, ev.note, ev.velocity);
   }
-  const endTick = Math.max(steps * TICKS_PER_STEP, lastTick);
-  track.push(...varLen(endTick - lastTick), 0xff, 0x2f, 0x00);
+  track.push(...varLen(Math.max(totalTicks, lastTick) - lastTick), 0xff, 0x2f, 0x00);
   return [
     0x4d, 0x54, 0x72, 0x6b, // MTrk
     (track.length >> 24) & 0xff, (track.length >> 16) & 0xff,
@@ -92,17 +92,27 @@ function trackChunk(events, steps, prefix = []) {
   ];
 }
 
-export function gridToMidi({
-  melodyGrid,
-  tieGrid,
+// segments: [{ grid, tieGrid, drumGrid, steps }] played back to back.
+export function songToMidi({
+  segments,
   rowNotes,
-  drumGrid,
   drumNotes,
-  steps,
   bpm,
   swing = 0.5, // ratio 0.5 (straight) … 0.75
+  melodyAudible,
+  drumAudible,
 }) {
   const swingTicks = Math.round((swing - 0.5) * 2 * TICKS_PER_STEP);
+  const melody = [];
+  const drums = [];
+  let offset = 0;
+  for (const seg of segments) {
+    melodySegmentEvents(seg, rowNotes, melodyAudible, swingTicks, offset, melody);
+    drumSegmentEvents(seg, drumNotes, drumAudible, swingTicks, offset, drums);
+    offset += seg.steps * TICKS_PER_STEP;
+  }
+  sortEvents(melody);
+  sortEvents(drums);
 
   // Tempo meta event: microseconds per quarter note.
   const usPerQuarter = Math.round(60_000_000 / bpm);
@@ -113,12 +123,8 @@ export function gridToMidi({
     0x00, 0xc0, 10,
   ];
 
-  const melodyTrack = trackChunk(
-    melodyEvents(melodyGrid, tieGrid, rowNotes, steps, swingTicks),
-    steps,
-    melodyPrefix
-  );
-  const drumTrack = trackChunk(drumEvents(drumGrid, drumNotes, steps, swingTicks), steps);
+  const melodyTrack = trackChunk(melody, offset, melodyPrefix);
+  const drumTrack = trackChunk(drums, offset);
 
   return new Uint8Array([
     // MThd: format 1, two tracks, PPQ division.
