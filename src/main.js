@@ -49,6 +49,7 @@ let patterns = Array.from({ length: PATTERN_COUNT }, emptyPattern);
 let selectedPattern = 0;
 let activeTrack = 0;
 let trackSettings = defaultTrackSettings();
+let drumsMuted = false;
 let songChain = []; // pattern indices played in order when song mode is on
 let songMode = false;
 let bpm = 120;
@@ -134,6 +135,7 @@ function buildStateObject() {
       length: p.length,
     })),
     trackSettings,
+    drumsMuted,
     selectedPattern,
     songChain,
     songMode,
@@ -224,6 +226,7 @@ function applyStateData(data) {
       } else {
         trackSettings = defaultTrackSettings();
       }
+      drumsMuted = data.drumsMuted === true;
     } else if (data.cells) {
       // Older single-pattern format: migrate into slot A.
       patterns[0] = loadPattern({
@@ -332,6 +335,7 @@ engine.getNotesForStep = (step) => {
   return notes;
 };
 engine.getDrumsForStep = (step) => {
+  if (drumsMuted) return [];
   const pat = patterns[playingPatternIndex()];
   const hits = [];
   for (let row = 0; row < DRUM_ROWS; row++) {
@@ -831,6 +835,17 @@ for (let t = 0; t < TRACK_COUNT; t++) {
   trackTabsEl.appendChild(tab);
 }
 
+const drumMuteBtn = document.createElement("button");
+drumMuteBtn.className = "track-tab tab-drums";
+drumMuteBtn.textContent = "Drums";
+drumMuteBtn.title = "Tap to mute or unmute the drum track";
+drumMuteBtn.addEventListener("click", () => {
+  drumsMuted = !drumsMuted;
+  renderTrackBar();
+  saveState();
+});
+trackTabsEl.appendChild(drumMuteBtn);
+
 function setActiveTrack(t) {
   activeTrack = t;
   renderTrackBar();
@@ -840,10 +855,12 @@ function setActiveTrack(t) {
 
 function renderTrackBar() {
   const tabs = trackTabsEl.children;
-  for (let t = 0; t < tabs.length; t++) {
+  for (let t = 0; t < TRACK_COUNT; t++) {
     tabs[t].classList.toggle("active", t === activeTrack);
     tabs[t].classList.toggle("muted", trackSettings[t].muted);
   }
+  drumMuteBtn.classList.toggle("muted", drumsMuted);
+  document.getElementById("drum-grid").classList.toggle("drums-muted", drumsMuted);
   instrumentSelect.value = trackSettings[activeTrack].instrument;
   octLabel.textContent = `Oct ${trackSettings[activeTrack].octave > 0 ? "+" : ""}${trackSettings[activeTrack].octave}`;
   const gridEl = document.getElementById("grid");
@@ -1113,7 +1130,7 @@ function exportArgs() {
     bpm,
     swing: swing / 100,
     melodyAudible: Array.from({ length: ROWS }, (_, r) => rowAudible("melody", r)),
-    drumAudible: Array.from({ length: DRUM_ROWS }, (_, r) => rowAudible("drum", r)),
+    drumAudible: Array.from({ length: DRUM_ROWS }, (_, r) => !drumsMuted && rowAudible("drum", r)),
   };
 }
 

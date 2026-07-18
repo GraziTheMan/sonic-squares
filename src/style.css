@@ -280,6 +280,15 @@ body {
   text-decoration: line-through;
 }
 
+.track-tab.tab-drums {
+  border-bottom-color: var(--accent);
+  min-width: 56px;
+}
+
+.drum-grid.drums-muted .cell {
+  opacity: 0.35;
+}
+
 #instrument {
   background: var(--panel);
   color: var(--text);
