@@ -16,10 +16,31 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Persistent signing key supplied via environment (CI injects it from
+    // GitHub secrets) so every build signs identically — otherwise each
+    // Actions runner mints a fresh debug key and Android refuses in-place
+    // updates ("App not installed"). Without the env vars, builds fall back
+    // to default (unsigned release / local debug key).
+    def ciKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    def ciKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    signingConfigs {
+        ci {
+            if (ciKeystorePath != null) {
+                storeFile file(ciKeystorePath)
+                storePassword ciKeystorePassword
+                keyAlias 'tonematrix'
+                keyPassword ciKeystorePassword
+            }
+        }
+    }
     buildTypes {
+        debug {
+            if (ciKeystorePath != null) signingConfig signingConfigs.ci
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (ciKeystorePath != null) signingConfig signingConfigs.ci
         }
     }
 }
