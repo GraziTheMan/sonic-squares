@@ -64,6 +64,16 @@
       <div id="grid" class="grid" role="grid" aria-label="Melody grid"></div>
       <div id="drum-grid" class="grid drum-grid" role="grid" aria-label="Percussion grid"></div>
       <details class="settings">
+        <summary>Projects</summary>
+        <div class="project-save">
+          <input id="project-name" type="text" placeholder="Project name" maxlength="40" />
+          <button id="project-save" class="btn btn-small">Save</button>
+          <button id="project-import" class="btn btn-small">Import file</button>
+          <input id="project-file" type="file" accept=".json,application/json" hidden />
+        </div>
+        <div id="project-list" class="project-list"></div>
+      </details>
+      <details class="settings">
         <summary>Settings</summary>
         <label class="setting-row">
           <input type="checkbox" id="remap-toggle" />
@@ -72,6 +82,13 @@
             nearest their old pitch instead of keeping their grid position
           </span>
         </label>
+        <h3 class="settings-heading">Custom scale</h3>
+        <p class="settings-note">
+          Pick "Custom" in the scale menu to play it. Set a MIDI note for each
+          row &mdash; row 1 is the top of the grid.
+        </p>
+        <div id="custom-scale" class="drum-map"></div>
+        <button id="custom-scale-copy" class="btn btn-small">Start from current scale</button>
         <h3 class="settings-heading">MIDI output</h3>
         <p class="settings-note" id="midi-status">Checking for MIDI devices&hellip;</p>
         <select id="midi-out"></select>

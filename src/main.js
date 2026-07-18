@@ -42,13 +42,22 @@ let songMode = false;
 let bpm = 120;
 let swing = 50; // percent, 50 = straight … 75 = heavy
 let rootIndex = 0;
-let scaleIndex = 0;
+let scaleIndex = 0; // index into SCALES, or the string "custom"
+let customScale = buildRowNotes(48, SCALES[0].intervals); // one MIDI note per row, top first
+let customScaleSet = false; // becomes true once the user shapes it
 let drumMap = defaultDrumMap();
 let remapOnScaleChange = false;
 let mute = { melody: Array(ROWS).fill(false), drum: Array(DRUM_ROWS).fill(false) };
 let solo = { melody: Array(ROWS).fill(false), drum: Array(DRUM_ROWS).fill(false) };
 let midiOutId = ""; // "" = built-in synth
-let rowNotes = buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
+
+function currentScaleNotes() {
+  return scaleIndex === "custom"
+    ? [...customScale]
+    : buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
+}
+
+let rowNotes = currentScaleNotes();
 
 let viewPage = 0;
 let playingPage = 0;
@@ -96,32 +105,35 @@ const unpackBoolGrid = (s, rows) => {
   return g ? g.map((row) => row.map((v) => v === 1)) : null;
 };
 
+function buildStateObject() {
+  return {
+    patterns: patterns.map((p) => ({
+      cells: packGrid(p.grid),
+      ties: packGrid(p.tieGrid),
+      drums: packGrid(p.drumGrid),
+      length: p.length,
+    })),
+    selectedPattern,
+    songChain,
+    songMode,
+    bpm,
+    swing,
+    rootIndex,
+    scaleIndex,
+    customScale,
+    customScaleSet,
+    drumMap,
+    remapOnScaleChange,
+    muteMelody: mute.melody,
+    muteDrum: mute.drum,
+    soloMelody: solo.melody,
+    soloDrum: solo.drum,
+    midiOutId,
+  };
+}
+
 function saveState() {
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      patterns: patterns.map((p) => ({
-        cells: packGrid(p.grid),
-        ties: packGrid(p.tieGrid),
-        drums: packGrid(p.drumGrid),
-        length: p.length,
-      })),
-      selectedPattern,
-      songChain,
-      songMode,
-      bpm,
-      swing,
-      rootIndex,
-      scaleIndex,
-      drumMap,
-      remapOnScaleChange,
-      muteMelody: mute.melody,
-      muteDrum: mute.drum,
-      soloMelody: solo.melody,
-      soloDrum: solo.drum,
-      midiOutId,
-    })
-  );
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(buildStateObject()));
 }
 
 function loadPattern(saved) {
@@ -142,8 +154,15 @@ function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    const data = JSON.parse(raw);
+    applyStateData(JSON.parse(raw));
+  } catch {
+    // Corrupt state: start fresh.
+  }
+}
 
+// Parse a saved state object (current or older formats) into the globals.
+function applyStateData(data) {
+  {
     if (Array.isArray(data.patterns)) {
       for (let i = 0; i < Math.min(data.patterns.length, PATTERN_COUNT); i++) {
         patterns[i] = loadPattern(data.patterns[i]);
@@ -179,8 +198,18 @@ function loadState() {
     if (data.rootIndex >= 0 && data.rootIndex < ROOT_CHOICES.length) {
       rootIndex = data.rootIndex;
     }
-    if (data.scaleIndex >= 0 && data.scaleIndex < SCALES.length) {
+    if (data.scaleIndex === "custom") {
+      scaleIndex = "custom";
+    } else if (data.scaleIndex >= 0 && data.scaleIndex < SCALES.length) {
       scaleIndex = data.scaleIndex;
+    }
+    if (
+      Array.isArray(data.customScale) &&
+      data.customScale.length === ROWS &&
+      data.customScale.every((n) => Number.isInteger(n) && n >= 0 && n <= 127)
+    ) {
+      customScale = data.customScale;
+      customScaleSet = data.customScaleSet === true;
     }
     if (
       Array.isArray(data.drumMap) &&
@@ -189,9 +218,7 @@ function loadState() {
     ) {
       drumMap = data.drumMap;
     }
-    rowNotes = buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
-  } catch {
-    // Corrupt state: start fresh.
+    rowNotes = currentScaleNotes();
   }
 }
 
@@ -777,19 +804,30 @@ for (const [i, scale] of SCALES.entries()) {
   opt.textContent = scale.label;
   scaleSelect.appendChild(opt);
 }
+{
+  const opt = document.createElement("option");
+  opt.value = "custom";
+  opt.textContent = "Custom";
+  scaleSelect.appendChild(opt);
+}
+
+function stopPlayback() {
+  if (!engine.playing) return;
+  engine.stop();
+  stepQueue.length = 0;
+  drawnStep = -1;
+  uiChainPos = -1;
+  setPlayheadColumn(-1);
+  updatePageTabs();
+  renderPatternSlots();
+  renderSongChain();
+  playBtn.textContent = "Play";
+  playBtn.setAttribute("aria-pressed", "false");
+}
 
 playBtn.addEventListener("click", () => {
   if (engine.playing) {
-    engine.stop();
-    stepQueue.length = 0;
-    drawnStep = -1;
-    uiChainPos = -1;
-    setPlayheadColumn(-1);
-    updatePageTabs();
-    renderPatternSlots();
-    renderSongChain();
-    playBtn.textContent = "Play";
-    playBtn.setAttribute("aria-pressed", "false");
+    stopPlayback();
   } else {
     schedChainPos = 0;
     engine.start();
@@ -843,7 +881,8 @@ function remapPatterns(oldNotes, newNotes) {
 
 function applyScaleChange() {
   const oldNotes = rowNotes;
-  rowNotes = buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
+  rowNotes = currentScaleNotes();
+  rootSelect.disabled = scaleIndex === "custom";
   if (remapOnScaleChange) {
     remapPatterns(oldNotes, rowNotes);
     renderView();
@@ -859,7 +898,14 @@ rootSelect.addEventListener("change", () => {
 });
 
 scaleSelect.addEventListener("change", () => {
-  scaleIndex = +scaleSelect.value;
+  scaleIndex = scaleSelect.value === "custom" ? "custom" : +scaleSelect.value;
+  // First visit to Custom: start from whatever scale was playing so it
+  // sounds identical until the user shapes it.
+  if (scaleIndex === "custom" && !customScaleSet) {
+    customScale = [...rowNotes];
+    customScaleSet = true;
+    renderCustomScale();
+  }
   applyScaleChange();
 });
 
@@ -930,6 +976,173 @@ exportWavBtn.addEventListener("click", async () => {
   } finally {
     exportWavBtn.disabled = false;
     exportWavBtn.textContent = "Export WAV";
+  }
+});
+
+// ---- Custom scale editor ---------------------------------------------------
+
+const customScaleEl = document.getElementById("custom-scale");
+const customScaleInputs = [];
+
+for (let row = 0; row < ROWS; row++) {
+  const rowEl = document.createElement("label");
+  rowEl.className = "drum-map-row";
+
+  const name = document.createElement("span");
+  name.className = "drum-map-name";
+  name.textContent = row === 0 ? "Row 1 (top)" : row === ROWS - 1 ? `Row ${ROWS} (bottom)` : `Row ${row + 1}`;
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = 0;
+  input.max = 127;
+  input.inputMode = "numeric";
+
+  const noteName = document.createElement("span");
+  noteName.className = "drum-map-note";
+
+  input.addEventListener("change", () => {
+    const value = Math.min(127, Math.max(0, Math.round(+input.value || 0)));
+    input.value = value;
+    customScale[row] = value;
+    customScaleSet = true;
+    noteName.textContent = midiNoteName(value);
+    if (scaleIndex === "custom") {
+      rowNotes = [...customScale];
+      refreshMelodyTooltips();
+    }
+    engine.preview({ midi: value, velocity: VEL[1], midiVelocity: MIDI_VELOCITY[1] });
+    saveState();
+  });
+
+  rowEl.append(name, input, noteName);
+  customScaleEl.appendChild(rowEl);
+  customScaleInputs.push({ input, noteName });
+}
+
+function renderCustomScale() {
+  for (const [row, { input, noteName }] of customScaleInputs.entries()) {
+    input.value = customScale[row];
+    noteName.textContent = midiNoteName(customScale[row]);
+  }
+}
+
+document.getElementById("custom-scale-copy").addEventListener("click", () => {
+  customScale = [...rowNotes];
+  customScaleSet = true;
+  renderCustomScale();
+  if (scaleIndex !== "custom") {
+    scaleIndex = "custom";
+    scaleSelect.value = "custom";
+    applyScaleChange();
+  } else {
+    saveState();
+  }
+});
+
+// ---- Projects ---------------------------------------------------------------
+//
+// Named projects live in localStorage for instant save/load; export/import
+// moves them as .json files through the share sheet (native) or downloads
+// (browser), so they can be kept in any folder, synced, or shared.
+
+const PROJECTS_KEY = "tone-matrix-projects";
+const projectListEl = document.getElementById("project-list");
+const projectNameInput = document.getElementById("project-name");
+const projectFileInput = document.getElementById("project-file");
+
+function readProjects() {
+  try {
+    const data = JSON.parse(localStorage.getItem(PROJECTS_KEY));
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeProjects(projects) {
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  renderProjectList();
+}
+
+function loadProjectState(data) {
+  stopPlayback();
+  applyStateData(data);
+  saveState();
+  syncUI();
+}
+
+function renderProjectList() {
+  const projects = readProjects();
+  projectListEl.replaceChildren();
+  const names = Object.keys(projects).sort();
+  if (!names.length) {
+    const empty = document.createElement("span");
+    empty.className = "chain-empty";
+    empty.textContent = "no saved projects yet";
+    projectListEl.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = "project-row";
+    const label = document.createElement("span");
+    label.className = "project-name";
+    label.textContent = name;
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "btn btn-small";
+    loadBtn.textContent = "Load";
+    loadBtn.addEventListener("click", () => {
+      loadProjectState(projects[name]);
+      projectNameInput.value = name;
+    });
+    const exportBtn = document.createElement("button");
+    exportBtn.className = "btn btn-small";
+    exportBtn.textContent = "Export";
+    exportBtn.title = "Save as a file you can keep anywhere or share";
+    exportBtn.addEventListener("click", () => {
+      const bytes = new TextEncoder().encode(JSON.stringify(projects[name], null, 2));
+      const safe = name.replace(/[^\w\- ]+/g, "").trim() || "project";
+      downloadFile(bytes, `${safe}.tonematrix.json`, "application/json");
+    });
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "btn btn-small";
+    deleteBtn.textContent = "✕";
+    deleteBtn.title = "Delete";
+    deleteBtn.addEventListener("click", () => {
+      const next = readProjects();
+      delete next[name];
+      writeProjects(next);
+    });
+    row.append(label, loadBtn, exportBtn, deleteBtn);
+    projectListEl.appendChild(row);
+  }
+}
+
+document.getElementById("project-save").addEventListener("click", () => {
+  const name =
+    projectNameInput.value.trim() ||
+    `Project ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
+  projectNameInput.value = name;
+  const projects = readProjects();
+  projects[name] = buildStateObject();
+  writeProjects(projects);
+});
+
+document.getElementById("project-import").addEventListener("click", () => projectFileInput.click());
+
+projectFileInput.addEventListener("change", async () => {
+  const file = projectFileInput.files?.[0];
+  projectFileInput.value = "";
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data.patterns) && !data.cells) throw new Error("not a project");
+    loadProjectState(data);
+    const name = file.name.replace(/\.tonematrix\.json$|\.json$/i, "");
+    projectNameInput.value = name;
+  } catch {
+    alert("That file doesn't look like a Tone Matrix project.");
   }
 });
 
@@ -1033,26 +1246,36 @@ document.getElementById("drum-map-reset").addEventListener("click", () => {
 
 // ---- Init -----------------------------------------------------------------
 
+// Sync every control and view from the current state. Runs at startup and
+// again whenever a project is loaded or imported.
+function syncUI() {
+  viewPage = 0;
+  engine.bpm = bpm;
+  engine.swing = swing / 100;
+  bpmInput.value = bpm;
+  bpmLabel.textContent = `${bpm} BPM`;
+  swingInput.value = swing;
+  swingLabel.textContent = `Swing ${swing}%`;
+  rootSelect.value = rootIndex;
+  rootSelect.disabled = scaleIndex === "custom";
+  scaleSelect.value = scaleIndex;
+  lengthSelect.value = current().length;
+  remapToggle.checked = remapOnScaleChange;
+  songModeBtn.classList.toggle("active", songMode);
+  songModeBtn.setAttribute("aria-pressed", String(songMode));
+  refreshMelodyTooltips();
+  rebuildPageTabs();
+  renderView();
+  renderRowHeads();
+  renderPatternSlots();
+  renderSongChain();
+  renderDrumMap();
+  renderCustomScale();
+  renderProjectList();
+}
+
 loadState();
-engine.bpm = bpm;
-engine.swing = swing / 100;
-bpmInput.value = bpm;
-bpmLabel.textContent = `${bpm} BPM`;
-swingInput.value = swing;
-swingLabel.textContent = `Swing ${swing}%`;
-rootSelect.value = rootIndex;
-scaleSelect.value = scaleIndex;
-lengthSelect.value = current().length;
-remapToggle.checked = remapOnScaleChange;
-songModeBtn.classList.toggle("active", songMode);
-songModeBtn.setAttribute("aria-pressed", String(songMode));
 setTool("draw");
 setFollow(true);
-refreshMelodyTooltips();
-rebuildPageTabs();
-renderView();
-renderRowHeads();
-renderPatternSlots();
-renderSongChain();
-renderDrumMap();
+syncUI();
 initMidiOut();

@@ -10,7 +10,15 @@ never got: **MIDI export**.
 - 4×16 percussion grid underneath: open hat, closed hat, snare, kick — all
   synthesized in Web Audio (no samples).
 - Seven scales: Major/Minor Pentatonic, Blues, Dorian, Harmonic Minor,
-  Hungarian Minor, Phrygian Dominant — any root note.
+  Hungarian Minor, Phrygian Dominant — any root note — plus a **custom
+  scale builder** (Settings) that assigns any MIDI note to each of the 16
+  rows. It starts as a copy of the current scale so you can tweak from
+  there.
+- **Projects**: save named projects in-app for instant load, and
+  export/import them as `.tonematrix.json` files — on Android the share
+  sheet lets you save them to any folder (Files, Drive, …) or send them to
+  a friend, who can Import them back. Projects carry everything: patterns,
+  song chain, scale (custom included), drum mapping, tempo, swing.
 - Web Audio synth with a lookahead scheduler for tight, drift-free timing.
 - Tempo control (40–240 BPM) and swing (50–75%, applied to playback and
   export alike); patterns and settings auto-save to `localStorage`.

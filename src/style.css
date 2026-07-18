@@ -536,3 +536,42 @@ body {
   padding: 6px 10px;
   font-size: 0.8rem;
 }
+
+.project-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+#project-name {
+  flex: 1;
+  min-width: 140px;
+  background: var(--cell);
+  color: var(--text);
+  border: 1px solid #223044;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
