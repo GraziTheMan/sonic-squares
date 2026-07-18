@@ -1,3 +1,5 @@
+import { collectSong } from "./song.js";
+
 // Minimal Standard MIDI File writer — no dependencies.
 //
 // Format 1, two tracks: melody on channel 1 and percussion on channel 10
@@ -15,7 +17,7 @@
 const PPQ = 128; // ticks per quarter note
 const TICKS_PER_STEP = PPQ / 4; // a step is a 16th note
 
-const VELOCITY = { 1: 88, 2: 118 };
+export const MIDI_VELOCITY = { 1: 88, 2: 118 };
 
 function varLen(value) {
   // MIDI variable-length quantity, 7 bits per byte, MSB flags continuation.
@@ -24,45 +26,6 @@ function varLen(value) {
     bytes.unshift((value & 0x7f) | 0x80);
   }
   return bytes;
-}
-
-// Melody: walk each row merging tied runs into single long notes.
-function melodySegmentEvents(seg, rowNotes, audible, swingTicks, offset, events) {
-  const { grid, tieGrid, steps } = seg;
-  const tickOf = (s) => offset + s * TICKS_PER_STEP + (s % 2 ? swingTicks : 0);
-  for (let row = 0; row < grid.length; row++) {
-    if (!audible[row]) continue;
-    let step = 0;
-    while (step < steps) {
-      if (!grid[row][step]) {
-        step++;
-        continue;
-      }
-      let end = step;
-      while (end < steps - 1 && tieGrid[row][end] && grid[row][end + 1]) end++;
-      const note = rowNotes[row];
-      const velocity = VELOCITY[grid[row][step]] ?? VELOCITY[1];
-      events.push({ tick: tickOf(step), off: false, note, velocity, channel: 0 });
-      events.push({ tick: tickOf(end + 1), off: true, note, velocity: 0, channel: 0 });
-      step = end + 1;
-    }
-  }
-}
-
-// Drums: every active cell is its own hit.
-function drumSegmentEvents(seg, drumNotes, audible, swingTicks, offset, events) {
-  const { drumGrid, steps } = seg;
-  const tickOf = (s) => offset + s * TICKS_PER_STEP + (s % 2 ? swingTicks : 0);
-  for (let row = 0; row < drumGrid.length; row++) {
-    if (!audible[row]) continue;
-    for (let step = 0; step < steps; step++) {
-      if (!drumGrid[row][step]) continue;
-      const note = drumNotes[row];
-      const velocity = VELOCITY[drumGrid[row][step]] ?? VELOCITY[1];
-      events.push({ tick: tickOf(step), off: false, note, velocity, channel: 9 });
-      events.push({ tick: tickOf(step + 1), off: true, note, velocity: 0, channel: 9 });
-    }
-  }
 }
 
 function sortEvents(events) {
@@ -102,17 +65,27 @@ export function songToMidi({
   melodyAudible,
   drumAudible,
 }) {
+  const song = collectSong(segments, { melodyAudible, drumAudible });
   const swingTicks = Math.round((swing - 0.5) * 2 * TICKS_PER_STEP);
+  const tickOf = (s) => s * TICKS_PER_STEP + (s % 2 ? swingTicks : 0);
+
   const melody = [];
+  for (const n of song.melody) {
+    const note = rowNotes[n.row];
+    const velocity = MIDI_VELOCITY[n.value] ?? MIDI_VELOCITY[1];
+    melody.push({ tick: tickOf(n.step), off: false, note, velocity, channel: 0 });
+    melody.push({ tick: tickOf(n.step + n.durSteps), off: true, note, velocity: 0, channel: 0 });
+  }
   const drums = [];
-  let offset = 0;
-  for (const seg of segments) {
-    melodySegmentEvents(seg, rowNotes, melodyAudible, swingTicks, offset, melody);
-    drumSegmentEvents(seg, drumNotes, drumAudible, swingTicks, offset, drums);
-    offset += seg.steps * TICKS_PER_STEP;
+  for (const d of song.drums) {
+    const note = drumNotes[d.row];
+    const velocity = MIDI_VELOCITY[d.value] ?? MIDI_VELOCITY[1];
+    drums.push({ tick: tickOf(d.step), off: false, note, velocity, channel: 9 });
+    drums.push({ tick: tickOf(d.step + 1), off: true, note, velocity: 0, channel: 9 });
   }
   sortEvents(melody);
   sortEvents(drums);
+  const totalTicks = song.totalSteps * TICKS_PER_STEP;
 
   // Tempo meta event: microseconds per quarter note.
   const usPerQuarter = Math.round(60_000_000 / bpm);
@@ -123,8 +96,8 @@ export function songToMidi({
     0x00, 0xc0, 10,
   ];
 
-  const melodyTrack = trackChunk(melody, offset, melodyPrefix);
-  const drumTrack = trackChunk(drums, offset);
+  const melodyTrack = trackChunk(melody, totalTicks, melodyPrefix);
+  const drumTrack = trackChunk(drums, totalTicks);
 
   return new Uint8Array([
     // MThd: format 1, two tracks, PPQ division.
@@ -134,12 +107,16 @@ export function songToMidi({
   ]);
 }
 
-export function downloadMidi(bytes, filename = "tone-matrix.mid") {
-  const blob = new Blob([bytes], { type: "audio/midi" });
+export function downloadFile(bytes, filename, mime) {
+  const blob = new Blob([bytes], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function downloadMidi(bytes, filename = "tone-matrix.mid") {
+  downloadFile(bytes, filename, "audio/midi");
 }

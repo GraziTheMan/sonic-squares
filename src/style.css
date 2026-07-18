@@ -488,6 +488,17 @@ body {
   margin-top: 14px;
 }
 
+#midi-out {
+  background: var(--cell);
+  color: var(--text);
+  border: 1px solid #223044;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  max-width: 100%;
+  margin-bottom: 4px;
+}
+
 .drum-map {
   display: flex;
   flex-direction: column;

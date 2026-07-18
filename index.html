@@ -26,6 +26,7 @@
             <input id="swing" type="range" min="50" max="75" step="1" value="50" />
           </label>
           <button id="export" class="btn btn-accent">Export MIDI</button>
+          <button id="export-wav" class="btn btn-accent">Export WAV</button>
         </div>
         <div class="controls">
           <select id="root" title="Root note"></select>
@@ -71,6 +72,9 @@
             nearest their old pitch instead of keeping their grid position
           </span>
         </label>
+        <h3 class="settings-heading">MIDI output</h3>
+        <p class="settings-note" id="midi-status">Checking for MIDI devices&hellip;</p>
+        <select id="midi-out"></select>
         <h3 class="settings-heading">Percussion MIDI mapping</h3>
         <p class="settings-note">
           Exported drum notes go to MIDI channel 10. Defaults follow General

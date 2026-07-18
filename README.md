@@ -30,6 +30,14 @@ never got: **MIDI export**.
 - Optional **pitch-preserving scale changes** (Settings): when switching
   scale or root, notes move to the row nearest their old pitch instead of
   keeping their grid position, so the melody keeps its sound.
+- **Web MIDI output** (Settings): pick a connected MIDI device and live
+  playback drives it instead of the built-in synth — melody on channel 1,
+  drums on channel 10 with your custom note mapping, with the same
+  lookahead-accurate timing via timestamped messages. Chrome/Edge only;
+  other browsers fall back to the built-in synth.
+- **Export WAV** renders the piece offline through the exact same synth
+  voices (OfflineAudioContext, stereo 16-bit 44.1 kHz) — no re-recording,
+  no dropouts, includes the delay tail.
 - **Export MIDI** writes a Standard MIDI File (format 1) by hand: melody on
   channel 1, drums on channel 10, with a tempo meta event so the file opens
   at your BPM in any DAW. Downloads as `tone-matrix.mid`.
@@ -51,15 +59,25 @@ The `dist/` output is plain static files and works fully offline.
 
 ## Packaging for Android
 
-The production build in `dist/` can be wrapped with
-[Capacitor](https://capacitorjs.com/) to produce an installable APK:
+The repo ships with a ready-made [Capacitor](https://capacitorjs.com/)
+Android project in `android/` (app id `com.grazitheman.tonematrix`). To
+build an installable APK you need the Android SDK — either Android Studio
+or command-line tools:
 
 ```sh
-npm install @capacitor/core @capacitor/cli @capacitor/android
-npx cap init tone-matrix com.example.tonematrix --web-dir=dist
-npx cap add android
-npm run build && npx cap sync && npx cap open android
+npm install          # brings in @capacitor/android
+npm run build        # produce dist/
+npx cap sync android # copy dist/ into the Android project
+
+# then either open it in Android Studio:
+npx cap open android
+# or build straight from the CLI (requires ANDROID_HOME):
+cd android && ./gradlew assembleDebug
+# → android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Install the debug APK directly on your device (enable "install unknown
+apps"). The app runs fully offline.
 
 ## How MIDI export works
 

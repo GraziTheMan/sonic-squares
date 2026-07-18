@@ -1,0 +1,8 @@
+{
+  "appId": "com.grazitheman.tonematrix",
+  "appName": "Tone Matrix",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#0b0f14"
+  }
+}

@@ -10,7 +10,9 @@ import {
 } from "./scale.js";
 import { DRUMS, DRUM_ROWS, defaultDrumMap } from "./drums.js";
 import { AudioEngine } from "./audio.js";
-import { songToMidi, downloadMidi } from "./midi.js";
+import { songToMidi, downloadMidi, downloadFile, MIDI_VELOCITY } from "./midi.js";
+import { renderSongToWav } from "./render.js";
+import { MidiOut } from "./midiout.js";
 
 const STORAGE_KEY = "tone-matrix-state";
 const HOLD_MS = 400; // press-and-hold duration for accent / solo gestures
@@ -44,6 +46,7 @@ let drumMap = defaultDrumMap();
 let remapOnScaleChange = false;
 let mute = { melody: Array(ROWS).fill(false), drum: Array(DRUM_ROWS).fill(false) };
 let solo = { melody: Array(ROWS).fill(false), drum: Array(DRUM_ROWS).fill(false) };
+let midiOutId = ""; // "" = built-in synth
 let rowNotes = buildRowNotes(ROOT_CHOICES[rootIndex].midi, SCALES[scaleIndex].intervals);
 
 let viewPage = 0;
@@ -115,6 +118,7 @@ function saveState() {
       muteDrum: mute.drum,
       soloMelody: solo.melody,
       soloDrum: solo.drum,
+      midiOutId,
     })
   );
 }
@@ -158,6 +162,7 @@ function loadState() {
       solo.melody = boolArray(data.soloMelody, ROWS) ?? solo.melody;
       solo.drum = boolArray(data.soloDrum, DRUM_ROWS) ?? solo.drum;
       remapOnScaleChange = data.remapOnScaleChange === true;
+      if (typeof data.midiOutId === "string") midiOutId = data.midiOutId;
     } else if (data.cells) {
       // Older single-pattern format: migrate into slot A.
       patterns[0] = loadPattern({
@@ -238,9 +243,11 @@ engine.getNotesForStep = (step) => {
   const notes = [];
   for (let row = 0; row < ROWS; row++) {
     if (rowAudible("melody", row) && isNoteStart(pat, row, step)) {
+      const value = pat.grid[row][step];
       notes.push({
         midi: rowNotes[row],
-        velocity: VEL[pat.grid[row][step]],
+        velocity: VEL[value],
+        midiVelocity: MIDI_VELOCITY[value],
         durSteps: noteLength(pat, row, step),
       });
     }
@@ -252,7 +259,13 @@ engine.getDrumsForStep = (step) => {
   const hits = [];
   for (let row = 0; row < DRUM_ROWS; row++) {
     if (rowAudible("drum", row) && pat.drumGrid[row][step]) {
-      hits.push({ id: DRUMS[row].id, velocity: VEL[pat.drumGrid[row][step]] });
+      const value = pat.drumGrid[row][step];
+      hits.push({
+        id: DRUMS[row].id,
+        note: drumMap[row],
+        velocity: VEL[value],
+        midiVelocity: MIDI_VELOCITY[value],
+      });
     }
   }
   return hits;
@@ -390,9 +403,21 @@ function refreshMelodyTooltips() {
 function previewCell(kind, row, step) {
   const pat = current();
   if (kind === "drum") {
-    engine.previewDrum(DRUMS[row].id, VEL[pat.drumGrid[row][step]]);
+    const value = pat.drumGrid[row][step];
+    engine.previewDrum({
+      id: DRUMS[row].id,
+      note: drumMap[row],
+      velocity: VEL[value],
+      midiVelocity: MIDI_VELOCITY[value],
+    });
   } else {
-    engine.preview(rowNotes[row], VEL[pat.grid[row][step]], noteLength(pat, row, step));
+    const value = pat.grid[row][step];
+    engine.preview({
+      midi: rowNotes[row],
+      velocity: VEL[value],
+      midiVelocity: MIDI_VELOCITY[value],
+      durSteps: noteLength(pat, row, step),
+    });
   }
 }
 
@@ -872,10 +897,10 @@ document.getElementById("clear").addEventListener("click", () => {
   saveState();
 });
 
-document.getElementById("export").addEventListener("click", () => {
+function exportArgs() {
   const chain =
     songMode && songChain.length ? songChain.map((i) => patterns[i]) : [current()];
-  const bytes = songToMidi({
+  return {
     segments: chain.map((p) => ({
       grid: p.grid,
       tieGrid: p.tieGrid,
@@ -883,13 +908,78 @@ document.getElementById("export").addEventListener("click", () => {
       steps: p.length,
     })),
     rowNotes,
-    drumNotes: drumMap,
     bpm,
     swing: swing / 100,
     melodyAudible: Array.from({ length: ROWS }, (_, r) => rowAudible("melody", r)),
     drumAudible: Array.from({ length: DRUM_ROWS }, (_, r) => rowAudible("drum", r)),
-  });
-  downloadMidi(bytes);
+  };
+}
+
+document.getElementById("export").addEventListener("click", () => {
+  downloadMidi(songToMidi({ ...exportArgs(), drumNotes: drumMap }));
+});
+
+const exportWavBtn = document.getElementById("export-wav");
+exportWavBtn.addEventListener("click", async () => {
+  exportWavBtn.disabled = true;
+  exportWavBtn.textContent = "Rendering…";
+  try {
+    const bytes = await renderSongToWav(exportArgs());
+    downloadFile(bytes, "tone-matrix.wav", "audio/wav");
+  } finally {
+    exportWavBtn.disabled = false;
+    exportWavBtn.textContent = "Export WAV";
+  }
+});
+
+// ---- MIDI output ----------------------------------------------------------
+
+const midiOut = new MidiOut();
+engine.midiOut = midiOut;
+const midiOutSelect = document.getElementById("midi-out");
+const midiStatusEl = document.getElementById("midi-status");
+
+function renderMidiOutputs() {
+  const outputs = midiOut.outputs();
+  midiOutSelect.replaceChildren();
+  const off = document.createElement("option");
+  off.value = "";
+  off.textContent = "Built-in synth";
+  midiOutSelect.appendChild(off);
+  for (const { id, name } of outputs) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = name;
+    midiOutSelect.appendChild(opt);
+  }
+  // Keep the saved selection if that device is still connected.
+  if (midiOutId && outputs.some((o) => o.id === midiOutId)) {
+    midiOutSelect.value = midiOutId;
+    midiOut.select(midiOutId);
+  } else {
+    midiOutSelect.value = "";
+    midiOut.select(null);
+  }
+  midiStatusEl.textContent = outputs.length
+    ? "Live playback goes to the selected device (drums on channel 10, using the mapping below)."
+    : "No MIDI devices found — connect one and it will appear here. The built-in synth plays meanwhile.";
+}
+
+async function initMidiOut() {
+  if (!(await midiOut.init())) {
+    midiStatusEl.textContent =
+      "Web MIDI isn't supported in this browser, so playback uses the built-in synth. Chrome and Edge support it.";
+    midiOutSelect.disabled = true;
+    return;
+  }
+  midiOut.onchange = renderMidiOutputs;
+  renderMidiOutputs();
+}
+
+midiOutSelect.addEventListener("change", () => {
+  midiOutId = midiOutSelect.value;
+  midiOut.select(midiOutId || null);
+  saveState();
 });
 
 // ---- Percussion MIDI mapping panel ----------------------------------------
@@ -964,3 +1054,4 @@ renderRowHeads();
 renderPatternSlots();
 renderSongChain();
 renderDrumMap();
+initMidiOut();
