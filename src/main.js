@@ -10,7 +10,8 @@ import {
 } from "./scale.js";
 import { DRUMS, DRUM_ROWS, defaultDrumMap } from "./drums.js";
 import { AudioEngine } from "./audio.js";
-import { songToMidi, downloadMidi, downloadFile, MIDI_VELOCITY } from "./midi.js";
+import { songToMidi, MIDI_VELOCITY } from "./midi.js";
+import { downloadFile } from "./download.js";
 import { renderSongToWav } from "./render.js";
 import { MidiOut } from "./midiout.js";
 
@@ -916,7 +917,7 @@ function exportArgs() {
 }
 
 document.getElementById("export").addEventListener("click", () => {
-  downloadMidi(songToMidi({ ...exportArgs(), drumNotes: drumMap }));
+  downloadFile(songToMidi({ ...exportArgs(), drumNotes: drumMap }), "tone-matrix.mid", "audio/midi");
 });
 
 const exportWavBtn = document.getElementById("export-wav");
@@ -925,7 +926,7 @@ exportWavBtn.addEventListener("click", async () => {
   exportWavBtn.textContent = "Rendering…";
   try {
     const bytes = await renderSongToWav(exportArgs());
-    downloadFile(bytes, "tone-matrix.wav", "audio/wav");
+    await downloadFile(bytes, "tone-matrix.wav", "audio/wav");
   } finally {
     exportWavBtn.disabled = false;
     exportWavBtn.textContent = "Export WAV";

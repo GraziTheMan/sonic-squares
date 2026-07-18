@@ -107,16 +107,3 @@ export function songToMidi({
   ]);
 }
 
-export function downloadFile(bytes, filename, mime) {
-  const blob = new Blob([bytes], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-export function downloadMidi(bytes, filename = "tone-matrix.mid") {
-  downloadFile(bytes, filename, "audio/midi");
-}
