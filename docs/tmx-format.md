@@ -1,48 +1,52 @@
 # RollingTones `.tmx` save format (reverse-engineered)
 
-Findings from a real save file (`1.9.2022.a.tmx`, 2888 bytes, RollingTones
-`cz.hotarekv.rtones`). Everything below was derived from one dense song
-file; items marked **unconfirmed** need single-cell calibration files to
-pin down.
+Derived from real RollingTones (`cz.hotarekv.rtones`) save files plus
+single-cell calibration exports. Two container versions share the `TM3\0`
+magic.
 
-## Layout
+## Header
 
 | Offset | Size | Meaning |
 | ------ | ---- | ------- |
 | 0      | 4    | Magic `54 4d 33 00` — `"TM3\0"` |
-| 4      | 2    | u16 LE, `600` in sample. Tempo/speed — **unconfirmed**, plausibly steps per minute (600/4 = 150 BPM) |
-| 6      | 2    | `0f 02` in sample — **unknown** (scale? instrument? drum kit?) |
-| 8      | 2    | u16 LE, song chain length (`42` in sample) |
-| 10     | 50   | Song chain: fixed 50-slot array of page indices (u8). Entries beyond the length are stale garbage from earlier edits |
-| 60     | 1    | u8 page count (`11` in sample) |
-| 61     | 257×N | Pages |
+| 4      | 2    | Speed word (u16 LE). Newer files store BPM in the low 10 bits (`speed & 0x3ff`; a flag bit sits above): `1144 → 120`, `1174 → 150`. Older files stored quarter-BPM (`600 → 150`). |
 
-Total size = 61 + 257 × pageCount (matches exactly: 61 + 257×11 = 2888).
+## v2 container (RollingTones ~1.4)
 
-## Page (257 bytes)
+21-byte header, then `N` × 256-byte pages. Page count = `(size − 21) / 256`.
+No per-page index byte, no explicit song chain (pages play in order). Example
+calibration files are 277 bytes = 21 + 256 (one page).
 
-| Offset | Size | Meaning |
-| ------ | ---- | ------- |
-| 0      | 1    | Page index (0-based, matches position) |
-| 1      | 256  | 16×16 cell grid, one byte per cell |
+## v1 container (older, ~2022)
 
-Cell values: `0xff` = empty; `0x00`–`0x03` = note using one of four
-instruments/colors (only 0–3 observed in the sample).
+61-byte header, then `N` × 257-byte pages (a leading page-index byte + 256
+cells). Page count = `(size − 61) / 257`. The header carries a song chain: a
+u16 length at byte 8 and a fixed 50-slot array of page indices at byte 10; a
+u8 page count sits at byte 60. Example: a 2888-byte file = 61 + 257 × 11.
 
-Orientation (per observed drum-lane behaviour, still to be confirmed by
-calibration): the 256 cells are stored one **time step per 16-byte row**,
-with pitch/instrument **lanes across** — i.e. `cells[step*16 + lane]`.
-Drum-style lanes cluster at high lane indices (bottom of the screen), which
-matches RollingTones integrating drums as instruments inside the grid.
+## Cells (256 bytes, 16×16)
 
-**Still unconfirmed:** which lane index is the top row, exact top/bottom
-pitch direction, which instrument values are percussion, and the meaning of
-header bytes 6-7. Calibration plan: save files with (1) a single cell in a
-known corner, (2) the same plus one more known cell, (3) a change of
-tempo/instrument only — then diff.
+A cell's byte index is **`col*16 + row`**, where `col` is the time step
+(left→right) and `row` is the pitch lane with **row 0 at the top**. Confirmed
+by calibration: a note at screen bottom-left decodes to `col 0, row 15`;
+top-right to `col 15, row 0`.
 
-## Importer
+Cell values (RollingTones integrates drums as grid instruments, so they share
+the value space with melodic voices):
 
-`tools/tmx-import.mjs` converts a `.tmx` into a `.tonematrix.json` project
-(instruments 0–2 → tracks 1–3, instrument 3 folded into track 3; first 8 of
-the pages, chain filtered accordingly; assumed orientation as above).
+| Value | Instrument |
+| ----- | ---------- |
+| 0xff  | empty |
+| 0     | sine / melodic voice |
+| 1     | kick |
+| 2     | snare |
+| 3     | closed hi-hat |
+| 4     | open hi-hat |
+| 5+    | additional melodic voices (yellow/orange palette — provisional) |
+
+## Import
+
+`src/tmx.js` (`tmxToProject`) detects the container version, maps value 0 and
+5+ to melody tracks and values 1–4 into the Sonic Squares drum grid, and
+derives the song chain (v1) or page order (v2). The Import button and
+`tools/tmx-import.mjs` both use it.
