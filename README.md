@@ -12,8 +12,8 @@ never got: **MIDI export**.
   Each track has its own **instrument** (bell, music box, marimba, plucked string, organ, pad, square, triangle, saw) and
   its own **octave shift** (±2), and exports as its own MIDI track/channel
   with a matching GM program. Tap a track tab to select it, hold to mute.
-- 4×16 percussion grid underneath: open hat, closed hat, snare, kick — all
-  synthesized in Web Audio (no samples).
+- 7×16 percussion grid underneath: crash, open hat, closed hat, tambourine,
+  clap, snare, kick — all synthesized in Web Audio (no samples).
 - Seven scales: Major/Minor Pentatonic, Blues, Dorian, Harmonic Minor,
   Hungarian Minor, Phrygian Dominant — any root note — plus a **custom
   scale builder** (Settings) that assigns any MIDI note to each of the 16

@@ -19,7 +19,7 @@ const GRID = 16;
 const MAX_STEPS = 64;
 const OUR_PATTERNS = 12; // keep in sync with PATTERN_COUNT in main.js
 const OUR_TRACKS = 3;
-const DRUM_ROWS = 4;
+const DRUM_ROWS = 7; // keep in sync with DRUMS in drums.js
 
 export function isTmx(bytes) {
   return (
@@ -85,22 +85,21 @@ function readBpm(bytes) {
 }
 
 // RollingTones' palette: value 0 is the melodic (waveform-selectable) voice;
-// values 1-7 are all percussion (confirmed by calibration files). We have
-// four drum lanes, so the three extra RollingTones percussion sounds (5-7,
-// the yellow/orange/periwinkle instruments) fold onto the nearest lane.
-// Our drum rows top-to-bottom: 0 open hat, 1 closed hat, 2 snare, 3 kick.
+// values 1-7 are all percussion (confirmed by calibration files), and each
+// one now has a matching Sonic Squares drum lane. Drum rows top-to-bottom:
+// 0 crash, 1 open hat, 2 closed hat, 3 tambourine, 4 clap, 5 snare, 6 kick.
+const RT_DRUM_ROW = {
+  1: 6, // kick
+  2: 5, // snare
+  3: 2, // closed hi-hat
+  4: 1, // open hi-hat
+  5: 0, // crash
+  6: 3, // tambourine
+  7: 4, // clap
+};
 function routeValue(v) {
-  switch (v) {
-    case 0: return { track: 0 };   // sine / melody
-    case 1: return { drumRow: 3 }; // kick
-    case 2: return { drumRow: 2 }; // snare
-    case 3: return { drumRow: 1 }; // closed hi-hat
-    case 4: return { drumRow: 0 }; // open hi-hat
-    case 5: return { drumRow: 2 }; // extra perc → snare (provisional)
-    case 6: return { drumRow: 0 }; // extra perc → open hat (provisional)
-    case 7: return { drumRow: 1 }; // extra perc → closed hat (provisional)
-    default: return { drumRow: 2 };
-  }
+  if (v === 0) return { track: 0 };
+  return { drumRow: RT_DRUM_ROW[v] ?? 5 };
 }
 
 export function tmxToProject(bytes) {

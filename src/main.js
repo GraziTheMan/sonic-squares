@@ -177,7 +177,22 @@ function loadPattern(saved) {
     pat.tracks[0].grid = unpackGrid(saved.cells, ROWS) ?? pat.tracks[0].grid;
     pat.tracks[0].tieGrid = unpackBoolGrid(saved.ties, ROWS) ?? pat.tracks[0].tieGrid;
   }
-  pat.drumGrid = unpackGrid(saved.drums, DRUM_ROWS) ?? pat.drumGrid;
+  // Drums: current saves have DRUM_ROWS rows. Older saves had 4 rows
+  // (open hat, closed hat, snare, kick) before crash/tambourine/clap were
+  // added — remap those onto the new lane order by name.
+  const drums = unpackGrid(saved.drums, DRUM_ROWS);
+  if (drums) {
+    pat.drumGrid = drums;
+  } else {
+    const legacy = unpackGrid(saved.drums, 4);
+    if (legacy) {
+      const legacyIds = ["hatOpen", "hatClosed", "snare", "kick"];
+      for (let i = 0; i < 4; i++) {
+        const dest = DRUMS.findIndex((d) => d.id === legacyIds[i]);
+        if (dest >= 0) pat.drumGrid[dest] = legacy[i];
+      }
+    }
+  }
   if (PATTERN_LENGTHS.includes(saved.length)) pat.length = saved.length;
   return pat;
 }

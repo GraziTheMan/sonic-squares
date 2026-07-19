@@ -214,21 +214,27 @@ function playKarplus(chain, { freq, when, velocity, durSteps, stepDur, gain }) {
   }
 }
 
-function noiseSource(chain, when, dur, { type, freq, gain }) {
+function noiseSource(chain, when, dur, { type, freq, gain, q = 0, attack = 0 }) {
   const { ctx } = chain;
   const src = ctx.createBufferSource();
   src.buffer = chain.noise;
   const filter = ctx.createBiquadFilter();
   filter.type = type;
   filter.frequency.value = freq;
+  filter.Q.value = q;
   const env = ctx.createGain();
-  env.gain.setValueAtTime(gain, when);
+  if (attack > 0) {
+    env.gain.setValueAtTime(0.0001, when);
+    env.gain.exponentialRampToValueAtTime(gain, when + attack);
+  } else {
+    env.gain.setValueAtTime(gain, when);
+  }
   env.gain.exponentialRampToValueAtTime(0.0001, when + dur);
   src.connect(filter);
   filter.connect(env);
   env.connect(chain.master);
   src.start(when);
-  src.stop(when + dur + 0.05);
+  src.stop(when + dur + attack + 0.05);
 }
 
 // Synthesized drum kit, kept dry (no delay send) so the groove stays tight.
@@ -270,5 +276,27 @@ export function playDrum(chain, { id, when, velocity = 0.7 }) {
     case "hatOpen":
       noiseSource(chain, when, 0.32, { type: "highpass", freq: 6500, gain: 0.26 * v });
       break;
+    case "crash":
+      // Bright, long, shimmering: a broad highpass wash plus a resonant
+      // high band for the metallic edge.
+      noiseSource(chain, when, 1.3, { type: "highpass", freq: 4000, gain: 0.24 * v });
+      noiseSource(chain, when, 1.1, { type: "bandpass", freq: 9000, gain: 0.14 * v, q: 0.6 });
+      break;
+    case "tambourine":
+      // Short metallic jingle: a resonant high band with a quick attack so it
+      // "chinks" rather than clicks.
+      noiseSource(chain, when, 0.16, {
+        type: "bandpass", freq: 9500, gain: 0.5 * v, q: 1.4, attack: 0.002,
+      });
+      noiseSource(chain, when, 0.09, { type: "highpass", freq: 7000, gain: 0.18 * v });
+      break;
+    case "clap": {
+      // Classic clap: three fast noise bursts a few ms apart, then a slightly
+      // longer diffuse tail, all through a mid bandpass.
+      for (const [offset, dur, g] of [[0, 0.02, 0.5], [0.009, 0.02, 0.5], [0.018, 0.02, 0.5], [0.027, 0.13, 0.42]]) {
+        noiseSource(chain, when + offset, dur, { type: "bandpass", freq: 1100, gain: g * v, q: 0.7 });
+      }
+      break;
+    }
   }
 }
