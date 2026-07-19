@@ -15,11 +15,12 @@ import { songToMidi, MIDI_VELOCITY } from "./midi.js";
 import { downloadFile } from "./download.js";
 import { renderSongToWav } from "./render.js";
 import { MidiOut } from "./midiout.js";
+import { isTmx, tmxToProject } from "./tmx.js";
 
 const STORAGE_KEY = "tone-matrix-state";
 const HOLD_MS = 400; // press-and-hold duration for accent / solo gestures
-const PATTERN_COUNT = 8;
-const PATTERN_NAMES = "ABCDEFGH";
+const PATTERN_COUNT = 12;
+const PATTERN_NAMES = "ABCDEFGHIJKL";
 const TRACK_COUNT = 3;
 const OCTAVE_RANGE = 2; // per-track shift of ±2 octaves
 
@@ -1321,13 +1322,20 @@ projectFileInput.addEventListener("change", async () => {
   projectFileInput.value = "";
   if (!file) return;
   try {
-    const data = JSON.parse(await file.text());
-    if (!Array.isArray(data.patterns) && !data.cells) throw new Error("not a project");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let data;
+    if (isTmx(bytes)) {
+      // RollingTones song: convert on the fly.
+      data = tmxToProject(bytes);
+    } else {
+      data = JSON.parse(new TextDecoder().decode(bytes));
+      if (!Array.isArray(data.patterns) && !data.cells) throw new Error("not a project");
+    }
     loadProjectState(data);
-    const name = file.name.replace(/\.tonematrix\.json$|\.json$/i, "");
+    const name = file.name.replace(/\.tonematrix\.json$|\.json$|\.tmx$/i, "");
     projectNameInput.value = name;
   } catch {
-    alert("That file doesn't look like a Tone Matrix project.");
+    alert("That file doesn't look like a Tone Matrix project or RollingTones song.");
   }
 });
 

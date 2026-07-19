@@ -29,10 +29,16 @@ Total size = 61 + 257 × pageCount (matches exactly: 61 + 257×11 = 2888).
 Cell values: `0xff` = empty; `0x00`–`0x03` = note using one of four
 instruments/colors (only 0–3 observed in the sample).
 
-**Unconfirmed:** whether the 256 cells are row-major with rows = pitch and
-columns = time (or transposed), which end is the low note, and whether any
-rows are percussion. Calibration plan: save files with (1) a single cell in
-a known corner, (2) the same plus one more known cell, (3) a change of
+Orientation (per observed drum-lane behaviour, still to be confirmed by
+calibration): the 256 cells are stored one **time step per 16-byte row**,
+with pitch/instrument **lanes across** — i.e. `cells[step*16 + lane]`.
+Drum-style lanes cluster at high lane indices (bottom of the screen), which
+matches RollingTones integrating drums as instruments inside the grid.
+
+**Still unconfirmed:** which lane index is the top row, exact top/bottom
+pitch direction, which instrument values are percussion, and the meaning of
+header bytes 6-7. Calibration plan: save files with (1) a single cell in a
+known corner, (2) the same plus one more known cell, (3) a change of
 tempo/instrument only — then diff.
 
 ## Importer
