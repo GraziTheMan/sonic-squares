@@ -18,25 +18,6 @@
         <h1>Sonic&nbsp;Squares</h1>
         <div class="controls">
           <button id="play" class="btn btn-primary" aria-pressed="false">Play</button>
-          <label class="slider">
-            <span id="bpm-label">120 BPM</span>
-            <input id="bpm" type="range" min="40" max="240" step="1" value="120" />
-          </label>
-          <label class="slider">
-            <span id="swing-label">Swing 50%</span>
-            <input id="swing" type="range" min="50" max="75" step="1" value="50" />
-          </label>
-          <button id="export" class="btn btn-accent">Export MIDI</button>
-          <button id="export-wav" class="btn btn-accent">Export WAV</button>
-        </div>
-        <div class="controls">
-          <select id="root" title="Root note"></select>
-          <select id="scale" title="Scale"></select>
-          <select id="length" title="Pattern length">
-            <option value="16">16 steps</option>
-            <option value="32">32 steps</option>
-            <option value="64">64 steps</option>
-          </select>
           <div class="btn-group" role="group" aria-label="Edit tool">
             <button id="tool-draw" class="btn active" aria-pressed="true">Draw</button>
             <button id="tool-tie" class="btn" aria-pressed="false">Tie</button>
@@ -47,6 +28,18 @@
           </div>
         </div>
       </header>
+      <div id="pages" class="pages" hidden>
+        <div id="page-tabs" class="page-tabs"></div>
+        <button id="follow" class="btn btn-small active" aria-pressed="true" title="Follow the playhead across pages">
+          Follow
+        </button>
+      </div>
+      <div id="grid" class="grid" role="grid" aria-label="Melody grid"></div>
+      <div id="drum-grid" class="grid drum-grid" role="grid" aria-label="Percussion grid"></div>
+      <div class="track-bar">
+        <div id="track-tabs" class="track-tabs" role="group" aria-label="Melody tracks"></div>
+        <select id="instrument" title="Instrument for this track"></select>
+      </div>
       <div class="pattern-bar">
         <div id="pattern-slots" class="pattern-slots" role="group" aria-label="Patterns"></div>
         <button id="duplicate" class="btn btn-small" title="Copy this pattern into the next empty slot">
@@ -59,23 +52,37 @@
         <div id="song-chain" class="song-chain" aria-label="Song chain"></div>
         <button id="song-add" class="btn btn-small" title="Append the selected pattern to the song">+</button>
       </div>
-      <div class="track-bar">
-        <div id="track-tabs" class="track-tabs" role="group" aria-label="Melody tracks"></div>
-        <select id="instrument" title="Instrument for this track"></select>
-        <div class="octave-ctl" title="Octave shift for this track">
-          <button id="oct-down" class="btn btn-small" aria-label="Octave down">&minus;</button>
-          <span id="oct-label">Oct 0</span>
-          <button id="oct-up" class="btn btn-small" aria-label="Octave up">+</button>
+      <details class="settings" id="song-panel">
+        <summary>Song</summary>
+        <div class="panel-row">
+          <label class="slider">
+            <span id="bpm-label">120 BPM</span>
+            <input id="bpm" type="range" min="40" max="240" step="1" value="120" />
+          </label>
+          <label class="slider">
+            <span id="swing-label">Swing 50%</span>
+            <input id="swing" type="range" min="50" max="75" step="1" value="50" />
+          </label>
         </div>
-      </div>
-      <div id="pages" class="pages" hidden>
-        <div id="page-tabs" class="page-tabs"></div>
-        <button id="follow" class="btn btn-small active" aria-pressed="true" title="Follow the playhead across pages">
-          Follow
-        </button>
-      </div>
-      <div id="grid" class="grid" role="grid" aria-label="Melody grid"></div>
-      <div id="drum-grid" class="grid drum-grid" role="grid" aria-label="Percussion grid"></div>
+        <div class="panel-row">
+          <select id="root" title="Root note"></select>
+          <select id="scale" title="Scale"></select>
+          <select id="length" title="Pattern length">
+            <option value="16">16 steps</option>
+            <option value="32">32 steps</option>
+            <option value="64">64 steps</option>
+          </select>
+          <div class="octave-ctl" title="Octave shift for the selected track">
+            <button id="oct-down" class="btn btn-small" aria-label="Octave down">&minus;</button>
+            <span id="oct-label">Oct 0</span>
+            <button id="oct-up" class="btn btn-small" aria-label="Octave up">+</button>
+          </div>
+        </div>
+        <div class="panel-row">
+          <button id="export" class="btn btn-accent">Export MIDI</button>
+          <button id="export-wav" class="btn btn-accent">Export WAV</button>
+        </div>
+      </details>
       <details class="settings">
         <summary>Projects</summary>
         <div class="project-save">

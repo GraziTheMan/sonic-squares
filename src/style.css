@@ -46,7 +46,7 @@ body {
 
 .app {
   width: min(94vw, 640px);
-  padding: 16px 0 24px;
+  padding: 6px 0 24px;
 }
 
 .toolbar {
@@ -54,7 +54,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .toolbar h1 {
@@ -161,6 +161,16 @@ body {
   margin-bottom: 10px;
 }
 
+.pages[hidden] {
+  display: none;
+}
+
+.pattern-bar,
+.song-bar {
+  margin-bottom: 0;
+  margin-top: 10px;
+}
+
 .pattern-slots {
   display: flex;
   gap: 5px;
@@ -243,7 +253,7 @@ body {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-top: clamp(6px, 1.4vw, 12px);
 }
 
 .track-tabs {
@@ -794,4 +804,22 @@ body {
   .clear-menu {
     box-shadow: 0 8px 24px rgba(30, 45, 65, 0.25);
   }
+}
+
+
+.panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+#song-panel select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
 }
