@@ -11,18 +11,29 @@ magic.
 | 0      | 4    | Magic `54 4d 33 00` — `"TM3\0"` |
 | 4      | 2    | Speed word (u16 LE). Newer files store BPM in the low 10 bits (`speed & 0x3ff`; a flag bit sits above): `1144 → 120`, `1174 → 150`. Older files stored quarter-BPM (`600 → 150`). |
 
-## v2 container (RollingTones ~1.4)
+Three container layouts have been observed; `readPages` in `src/tmx.js`
+detects them by how the byte count divides (checking 257-byte pages before
+256-byte, since only the former leaves a whole-number multiple for
+multi-page files):
 
-21-byte header, then `N` × 256-byte pages. Page count = `(size − 21) / 256`.
-No per-page index byte, no explicit song chain (pages play in order). Example
-calibration files are 277 bytes = 21 + 256 (one page).
+**Newer, multi-page** — 21-byte header + `N` × 257-byte pages (a leading
+page-index byte + 256 cells). Page count sits at byte 8 (u16). Example: the
+two-page test is 535 = 21 + 2 × 257.
 
-## v1 container (older, ~2022)
+**Newer, single-page** — 21-byte header + one 256-byte page (no index byte).
+Example: the calibration files are 277 = 21 + 256.
 
-61-byte header, then `N` × 257-byte pages (a leading page-index byte + 256
-cells). Page count = `(size − 61) / 257`. The header carries a song chain: a
-u16 length at byte 8 and a fixed 50-slot array of page indices at byte 10; a
-u8 page count sits at byte 60. Example: a 2888-byte file = 61 + 257 × 11.
+**Older (~2022)** — 61-byte header + `N` × 257-byte pages. Here byte 8 (u16)
+is instead the song-chain length, with a fixed 50-slot chain of page indices
+at byte 10. Example: a 2888-byte file = 61 + 11 × 257.
+
+Header byte 12 (newer format) is the melodic voice's **waveform** index:
+0 Bipolar Sinus, 1 Bipolar Triangle, 2 Bipolar Sawtooth, 3 Bipolar Square,
+4-7 the normalised variants. The importer maps the shape (index mod 4) to the
+matching Sonic Squares instrument for the melody track.
+
+Not yet decoded: the scale/key (RollingTones offers e.g. E Harmonic Minor);
+imports keep the note row positions but default to the app's own scale.
 
 ## Cells (256 bytes, 16×16)
 
@@ -37,12 +48,17 @@ the value space with melodic voices):
 | Value | Instrument |
 | ----- | ---------- |
 | 0xff  | empty |
-| 0     | sine / melodic voice |
+| 0     | melodic voice (waveform-selectable "Sine") |
 | 1     | kick |
 | 2     | snare |
 | 3     | closed hi-hat |
 | 4     | open hi-hat |
-| 5+    | additional melodic voices (yellow/orange palette — provisional) |
+| 5,6,7 | three more percussion sounds (yellow/orange/periwinkle palette) |
+
+Confirmed by a calibration file placing values 1–7 across the bottom row:
+**every value 1–7 is percussion**; only value 0 is melodic. Sonic Squares has
+four drum lanes, so values 5–7 fold onto the nearest lane (provisional until
+those three sounds are individually identified).
 
 ## Import
 

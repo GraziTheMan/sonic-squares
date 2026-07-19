@@ -28,30 +28,50 @@ export function isTmx(bytes) {
   );
 }
 
-// Locate the pages: [{ cells: Uint8Array(256) }], detecting the container
-// version from how the byte count divides.
+// Locate the pages ([Uint8Array(256)]) plus any song chain and the melodic
+// waveform, detecting the container from how the byte count divides.
+// Confirmed against real files:
+//   - 21-byte header + N × 257-byte pages (index byte + 256 cells) for
+//     multi-page newer files (e.g. 535 = 21 + 2×257).
+//   - 21-byte header + one 256-byte page (no index byte) for single-page
+//     newer files (277 = 21 + 256).
+//   - 61-byte header (u16 chain length at byte 8, 50-slot chain at byte 10)
+//     + N × 257-byte pages for older files (2888 = 61 + 11×257).
 function readPages(bytes) {
   const n = bytes.length;
-  if ((n - 21) % 256 === 0) {
-    // v2: 21-byte header + 256-byte pages.
-    const count = (n - 21) / 256;
+  const slicePages = (headerLen, hasIndexByte) => {
+    const pageLen = hasIndexByte ? 257 : 256;
+    const count = (n - headerLen) / pageLen;
     const pages = [];
-    for (let k = 0; k < count; k++) pages.push(bytes.slice(21 + 256 * k, 21 + 256 * k + 256));
-    return { pages, chain: null };
+    for (let k = 0; k < count; k++) {
+      const base = headerLen + pageLen * k + (hasIndexByte ? 1 : 0);
+      pages.push(bytes.slice(base, base + 256));
+    }
+    return pages;
+  };
+
+  // The melodic "Sine" voice's waveform index lives at header byte 12 in the
+  // newer format (0 Bip-Sinus, 1 Bip-Tri, 2 Bip-Saw, 3 Bip-Square, 4-7 the
+  // normalised variants).
+  const waveform = bytes[12] <= 7 ? bytes[12] : 0;
+
+  if ((n - 21) % 257 === 0) {
+    return { pages: slicePages(21, true), chain: null, waveform };
+  }
+  if ((n - 21) % 256 === 0) {
+    return { pages: slicePages(21, false), chain: null, waveform };
   }
   if ((n - 61) % 257 === 0) {
-    // v1: 61-byte header (u16 chain length + 50-slot chain at byte 10, u8
-    // page count at 60) + 257-byte pages (index byte + 256 cells).
-    const count = (n - 61) / 257;
     const chainLen = bytes[8] | (bytes[9] << 8);
     const chain = [...bytes.slice(10, 10 + Math.min(chainLen, 50))];
-    const pages = [];
-    for (let k = 0; k < count; k++)
-      pages.push(bytes.slice(61 + 257 * k + 1, 61 + 257 * k + 257));
-    return { pages, chain };
+    return { pages: slicePages(61, true), chain, waveform: null };
   }
   throw new Error("unrecognized TM3 layout");
 }
+
+// RollingTones' four melodic waveforms (bipolar and normalised share a shape)
+// mapped to the nearest Sonic Squares instrument.
+const WAVEFORM_INSTRUMENT = ["bell", "triangle", "sawtooth", "square"];
 
 // Tempo: newer files store BPM in the low 10 bits of the speed word (a flag
 // bit sits above it); older files stored quarter-BPM. Try each, else default.
@@ -64,22 +84,30 @@ function readBpm(bytes) {
   return 120;
 }
 
-// RollingTones drums are grid instruments; route them into our drum grid.
+// RollingTones' palette: value 0 is the melodic (waveform-selectable) voice;
+// values 1-7 are all percussion (confirmed by calibration files). We have
+// four drum lanes, so the three extra RollingTones percussion sounds (5-7,
+// the yellow/orange/periwinkle instruments) fold onto the nearest lane.
 // Our drum rows top-to-bottom: 0 open hat, 1 closed hat, 2 snare, 3 kick.
 function routeValue(v) {
   switch (v) {
+    case 0: return { track: 0 };   // sine / melody
     case 1: return { drumRow: 3 }; // kick
     case 2: return { drumRow: 2 }; // snare
     case 3: return { drumRow: 1 }; // closed hi-hat
     case 4: return { drumRow: 0 }; // open hi-hat
-    case 0: return { track: 0 };   // sine / melody
-    default: return { track: Math.min(v - 4, OUR_TRACKS - 1) }; // extra melodic voices
+    case 5: return { drumRow: 2 }; // extra perc → snare (provisional)
+    case 6: return { drumRow: 0 }; // extra perc → open hat (provisional)
+    case 7: return { drumRow: 1 }; // extra perc → closed hat (provisional)
+    default: return { drumRow: 2 };
   }
 }
 
 export function tmxToProject(bytes) {
   if (!isTmx(bytes)) throw new Error("not a TM3 file");
-  const { pages, chain } = readPages(bytes);
+  const { pages, chain, waveform } = readPages(bytes);
+  const melodyInstrument =
+    waveform != null ? WAVEFORM_INSTRUMENT[waveform % 4] : "bell";
 
   const emptyRow = () => Array(MAX_STEPS).fill(0);
   const packGrid = (g) => g.map((row) => row.join("")).join("|");
@@ -127,7 +155,7 @@ export function tmxToProject(bytes) {
     rootIndex: 0,
     scaleIndex: 0,
     trackSettings: [
-      { instrument: "bell", octave: 0, muted: false },
+      { instrument: melodyInstrument, octave: 0, muted: false },
       { instrument: "musicbox", octave: 0, muted: false },
       { instrument: "marimba", octave: 0, muted: false },
     ],
