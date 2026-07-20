@@ -1,6 +1,6 @@
 # Sonic Squares — Privacy Policy
 
-_Last updated: 18 July 2026_
+_Last updated: 20 July 2026_
 
 Sonic Squares is a music sequencer app. It is designed to work entirely on
 your device.
@@ -34,7 +34,7 @@ own permission prompt.
 
 Questions about this policy: open an issue at
 https://github.com/GraziTheMan/sonic-squares or contact the developer,
-GraziTheMan, via GitHub.
+GraziTheMan, via GitHub, or at the email address: grazisoftware@gmail.com.
 
 ## Changes
 
