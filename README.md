@@ -20,11 +20,13 @@ Google Play; built as a web app wrapped with Capacitor.
   ambience. The mix applies to playback and to WAV export.
 - 7×16 percussion grid underneath: crash, open hat, closed hat, tambourine,
   clap, snare, kick — all synthesized in Web Audio (no samples).
-- **16 scales** — Major/Minor Pentatonic, Blues, the church modes (Ionian,
-  Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian), Harmonic and
-  Melodic Minor, Hungarian Minor, Phrygian Dominant, and Whole-Half
-  Diminished — at any root, plus a **custom scale builder** (Settings) that
-  assigns any MIDI note to each of the 16 rows.
+- **16 scales**, grouped in the menu — Major/Minor Pentatonic and Blues; the
+  seven modes (Ionian/Major, Dorian, Phrygian, Lydian, Mixolydian,
+  Aeolian/Natural Minor, Locrian); Harmonic and Melodic Minor; Hungarian
+  Minor, Phrygian Dominant, and Whole-Half Diminished; plus Chromatic — at
+  any root, and a **custom scale builder** (Settings) that assigns any MIDI
+  note to each of the 16 rows. Projects store the scale by name, so the menu
+  can be reordered without affecting saved work.
 - **Import RollingTones songs**: the Projects Import button reads `.tmx`
   save files (both the older multi-page and newer container formats),
   mapping their melody, drums, tempo, and waveform into the app. See

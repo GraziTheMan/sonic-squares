@@ -4,6 +4,8 @@ import {
   MAX_STEPS,
   PATTERN_LENGTHS,
   SCALES,
+  LEGACY_SCALE_IDS,
+  scaleIndexById,
   ROOT_CHOICES,
   buildRowNotes,
   midiNoteName,
@@ -163,7 +165,8 @@ function buildStateObject() {
     bpm,
     swing,
     rootIndex,
-    scaleIndex,
+    // Store the scale by stable id so the list can be reordered safely.
+    scaleId: scaleIndex === "custom" ? "custom" : SCALES[scaleIndex].id,
     customScale,
     customScaleSet,
     drumMap,
@@ -289,10 +292,16 @@ function applyStateData(data) {
     if (data.rootIndex >= 0 && data.rootIndex < ROOT_CHOICES.length) {
       rootIndex = data.rootIndex;
     }
-    if (data.scaleIndex === "custom") {
+    // Scale: prefer the stable id; fall back to a legacy numeric index from
+    // projects saved before id-based storage.
+    if (data.scaleId === "custom" || data.scaleIndex === "custom") {
       scaleIndex = "custom";
-    } else if (data.scaleIndex >= 0 && data.scaleIndex < SCALES.length) {
-      scaleIndex = data.scaleIndex;
+    } else if (typeof data.scaleId === "string") {
+      scaleIndex = scaleIndexById(data.scaleId);
+    } else if (Number.isInteger(data.scaleIndex) && data.scaleIndex < LEGACY_SCALE_IDS.length) {
+      scaleIndex = scaleIndexById(LEGACY_SCALE_IDS[data.scaleIndex]);
+    } else {
+      scaleIndex = 0;
     }
     if (
       Array.isArray(data.customScale) &&
@@ -1082,17 +1091,26 @@ for (const [i, root] of ROOT_CHOICES.entries()) {
   opt.textContent = root.label;
   rootSelect.appendChild(opt);
 }
-for (const [i, scale] of SCALES.entries()) {
-  const opt = document.createElement("option");
-  opt.value = i;
-  opt.textContent = scale.label;
-  scaleSelect.appendChild(opt);
-}
 {
+  let group = null;
+  for (const [i, scale] of SCALES.entries()) {
+    if (scale.group !== group?.label) {
+      group = document.createElement("optgroup");
+      group.label = scale.group;
+      scaleSelect.appendChild(group);
+    }
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = scale.label;
+    group.appendChild(opt);
+  }
+  const customGroup = document.createElement("optgroup");
+  customGroup.label = "Custom";
   const opt = document.createElement("option");
   opt.value = "custom";
-  opt.textContent = "Custom";
-  scaleSelect.appendChild(opt);
+  opt.textContent = "Custom…";
+  customGroup.appendChild(opt);
+  scaleSelect.appendChild(customGroup);
 }
 
 function stopPlayback() {
