@@ -138,6 +138,9 @@ body {
 
 .btn-group .btn:last-child {
   border-radius: 0 8px 8px 0;
+}
+
+.btn-group .btn:not(:first-child) {
   border-left: none;
 }
 
@@ -440,8 +443,30 @@ body {
   opacity: 0.35;
 }
 
-.grid.tie-mode .cell {
+.grid.tie-mode .cell,
+.grid.nat-mode .cell {
   cursor: crosshair;
+}
+
+/* Columns past the pattern length: greyed and inert. */
+.cell.inactive {
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+/* Natural accidental: a small white ♮ on the note. */
+.cell.on.natural::before {
+  content: "♮";
+  position: absolute;
+  top: -2%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: clamp(9px, 2.6vw, 15px);
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .cell:hover {
@@ -716,8 +741,45 @@ body {
   background: var(--cell-hover);
 }
 
+.menu-heading {
+  padding: 6px 12px 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.copy-dests {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  padding: 4px 8px 6px;
+}
+
+.copy-dest {
+  background: var(--cell);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 0;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.copy-dest:hover:not(:disabled) {
+  background: var(--cell-hover);
+  border-color: var(--on);
+}
+
+.copy-dest:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .setting-slider {
   margin-top: 10px;
+}
+
+#length-label {
+  min-width: 116px;
 }
 
 .mixer {

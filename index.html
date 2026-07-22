@@ -21,13 +21,13 @@
           <div class="btn-group" role="group" aria-label="Edit tool">
             <button id="tool-draw" class="btn active" aria-pressed="true">Draw</button>
             <button id="tool-tie" class="btn" aria-pressed="false">Tie</button>
+            <button id="tool-nat" class="btn" aria-pressed="false"
+              title="Natural: snap a note to its natural (white-key) pitch">Nat</button>
           </div>
           <div class="clear-wrap">
             <button id="clear" class="btn" aria-haspopup="true" aria-expanded="false">Clear&hellip;</button>
             <div id="clear-menu" class="clear-menu" hidden></div>
           </div>
-          <button id="follow" class="btn active" aria-pressed="true"
-            title="Follow the playhead across pages and the song chain while playing">Follow</button>
         </div>
       </header>
       <div id="pages" class="pages" hidden>
@@ -44,8 +44,15 @@
         <button id="duplicate" class="btn btn-small" title="Copy this pattern into the next empty slot">
           Duplicate
         </button>
+        <div class="clear-wrap">
+          <button id="copy" class="btn btn-small" aria-haspopup="true" aria-expanded="false"
+            title="Copy one track or the drums onto another pattern">Copy&hellip;</button>
+          <div id="copy-menu" class="clear-menu" hidden></div>
+        </div>
       </div>
       <div class="song-bar">
+        <button id="follow" class="btn btn-small active" aria-pressed="true"
+          title="Follow the playhead across pages and the song chain while playing">Follow</button>
         <button id="song-mode" class="btn btn-small" aria-pressed="false"
           title="Play the song chain instead of looping one pattern">Song</button>
         <div id="song-chain" class="song-chain" aria-label="Song chain"></div>
@@ -78,17 +85,22 @@
         <div class="panel-row">
           <select id="root" title="Root note"></select>
           <select id="scale" title="Scale"></select>
-          <select id="length" title="Pattern length">
-            <option value="16">16 steps</option>
-            <option value="32">32 steps</option>
-            <option value="64">64 steps</option>
-          </select>
           <div class="octave-ctl" title="Octave shift for the selected track">
             <button id="oct-down" class="btn btn-small" aria-label="Octave down">&minus;</button>
             <span id="oct-label">Oct 0</span>
             <button id="oct-up" class="btn btn-small" aria-label="Octave up">+</button>
           </div>
         </div>
+        <label class="slider setting-slider">
+          <span id="length-label">16 steps (4/4)</span>
+          <input id="length" type="range" min="1" max="64" step="1" value="16"
+            title="Steps per pattern (16th notes): 12 = 3/4, 16 = 4/4" />
+        </label>
+        <p class="settings-note">
+          Steps per pattern (16th notes). Shorten for partial measures or
+          other meters — the playhead wraps early and moves to the next
+          pattern in a song.
+        </p>
         <div class="panel-row">
           <button id="export" class="btn btn-accent">Export MIDI</button>
           <button id="export-wav" class="btn btn-accent">Export WAV</button>
@@ -154,8 +166,10 @@
           <p>
             Tap a cell to place a note; tap again to remove it. Drag to paint
             several at once. <b>Press and hold</b> a note to accent it (louder);
-            hold again to un-accent. Switch the top tool to <b>Tie</b> to join a
-            note to its right-hand neighbour into one longer note.
+            hold again to un-accent. The top tools switch what a tap does:
+            <b>Draw</b> places notes, <b>Tie</b> joins a note to its right-hand
+            neighbour into one longer note, and <b>Nat</b> snaps a note to its
+            natural (white-key) pitch when you need one note outside the scale.
           </p>
           <h3>Tracks &amp; drums</h3>
           <p>
@@ -169,9 +183,12 @@
           <h3>Patterns &amp; songs</h3>
           <p>
             The A–L buttons are pattern slots; <b>Duplicate</b> copies the
-            current one. Turn on <b>Song</b> and tap <b>+</b> to chain patterns
-            into a full arrangement. <b>Follow</b> makes the view track what's
-            playing.
+            whole pattern to the next free slot, and <b>Copy</b> copies just
+            one track or the drums onto any pattern. Turn on <b>Song</b> and tap
+            <b>+</b> to chain patterns into a full arrangement. <b>Follow</b>
+            makes the view track what's playing. In the <b>Song</b> panel, the
+            <b>Steps</b> slider sets how long a pattern is (12 = 3/4, 16 = 4/4,
+            etc.) — shorten it for partial measures.
           </p>
           <h3>Panels</h3>
           <p>

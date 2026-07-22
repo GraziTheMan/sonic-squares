@@ -79,6 +79,15 @@ export function midiToFreq(midi) {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
+// The "Natural" accidental: snap a pitch to the nearest natural (white-key)
+// note. Black keys (pitch classes 1,3,6,8,10) sit exactly one semitone above
+// a white key, so lowering by one always lands on a natural; white keys are
+// already natural and unchanged.
+const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
+export function naturalize(midi) {
+  return BLACK_KEYS.has(((midi % 12) + 12) % 12) ? midi - 1 : midi;
+}
+
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 export function midiNoteName(midi) {

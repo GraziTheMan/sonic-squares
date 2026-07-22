@@ -1,4 +1,5 @@
 import { collectSong } from "./song.js";
+import { naturalize } from "./scale.js";
 
 // Minimal Standard MIDI File writer — no dependencies.
 //
@@ -90,7 +91,8 @@ export function songToMidi({
 
   const melodyByTrack = trackNotes.map(() => []);
   for (const n of song.melody) {
-    const note = trackNotes[n.track][n.row];
+    const base = trackNotes[n.track][n.row];
+    const note = n.natural ? naturalize(base) : base;
     const velocity = velocityOf(n.value);
     const channel = n.track;
     melodyByTrack[n.track].push({ tick: tickOf(n.step), off: false, note, velocity, channel });

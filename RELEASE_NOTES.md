@@ -9,6 +9,17 @@ note that beside each entry so you can match a Play upload to a commit.
 
 ---
 
+## v0.1.x — Meter, naturals, copy
+
+```
+• New Steps slider: set any pattern length for 3/4, partial measures, and
+  other meters — the playhead wraps early and moves on.
+• New Nat tool: make a single note natural when you need one outside the
+  scale.
+• New Copy button: copy one track or the drums onto another pattern.
+• Follow moved down next to Song.
+```
+
 ## v0.1.23 — Track mixer, Follow, help
 
 ```

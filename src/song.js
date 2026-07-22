@@ -13,7 +13,7 @@ export function collectSong(segments, { melodyAudible, drumAudible, trackAudible
     const { tracks, drumGrid, steps } = seg;
     for (let t = 0; t < tracks.length; t++) {
       if (trackAudible && !trackAudible[t]) continue;
-      const { grid, tieGrid } = tracks[t];
+      const { grid, tieGrid, natGrid } = tracks[t];
       for (let row = 0; row < grid.length; row++) {
         if (!melodyAudible[row]) continue;
         let step = 0;
@@ -30,6 +30,7 @@ export function collectSong(segments, { melodyAudible, drumAudible, trackAudible
             durSteps: end - step + 1,
             row,
             value: grid[row][step],
+            natural: !!natGrid?.[row][step],
           });
           step = end + 1;
         }

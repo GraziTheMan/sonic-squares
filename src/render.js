@@ -1,6 +1,7 @@
 import { collectSong } from "./song.js";
 import { createChain, playNote, playDrum } from "./synth.js";
 import { DRUMS } from "./drums.js";
+import { naturalize } from "./scale.js";
 
 // Offline audio export: renders the song through the exact same synth voices
 // as live playback using an OfflineAudioContext, then encodes 16-bit PCM WAV.
@@ -42,7 +43,7 @@ export async function renderSongToWav({
 
   for (const n of song.melody) {
     playNote(chain, {
-      midi: trackNotes[n.track][n.row],
+      midi: n.natural ? naturalize(trackNotes[n.track][n.row]) : trackNotes[n.track][n.row],
       when: timeOf(n.step),
       velocity: velOf(n.value),
       durSteps: n.durSteps,

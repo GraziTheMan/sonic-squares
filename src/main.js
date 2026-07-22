@@ -9,6 +9,7 @@ import {
   ROOT_CHOICES,
   buildRowNotes,
   midiNoteName,
+  naturalize,
 } from "./scale.js";
 import { DRUMS, DRUM_ROWS, defaultDrumMap } from "./drums.js";
 import { AudioEngine } from "./audio.js";
@@ -41,6 +42,7 @@ const emptyGrid = (rows, fill = 0) =>
 const emptyTrack = () => ({
   grid: emptyGrid(ROWS),
   tieGrid: emptyGrid(ROWS, false),
+  natGrid: emptyGrid(ROWS, false), // per-cell "natural" accidental
 });
 
 const emptyPattern = () => ({
@@ -51,6 +53,18 @@ const emptyPattern = () => ({
 
 const defaultTrackSettings = () =>
   Array.from({ length: TRACK_COUNT }, () => ({ instrument: "bell", octave: 0, muted: false }));
+
+const cloneRows = (g) => g.map((r) => [...r]);
+const cloneTrack = (t) => ({
+  grid: cloneRows(t.grid),
+  tieGrid: cloneRows(t.tieGrid),
+  natGrid: cloneRows(t.natGrid),
+});
+const clonePattern = (p) => ({
+  tracks: p.tracks.map(cloneTrack),
+  drumGrid: cloneRows(p.drumGrid),
+  length: p.length,
+});
 
 let patterns = Array.from({ length: PATTERN_COUNT }, emptyPattern);
 let selectedPattern = 0;
@@ -103,8 +117,11 @@ let uiPlayingPattern = 0;
 let uiChainPos = -1;
 
 const current = () => patterns[selectedPattern];
-const pageCount = () => current().length / VIEW_COLS;
+const pageCount = () => Math.ceil(current().length / VIEW_COLS);
 const stepOf = (col) => viewPage * VIEW_COLS + col;
+// A column is inactive when its global step is past the pattern's length —
+// those steps grey out, don't play, and aren't paintable.
+const stepActive = (step) => step < current().length;
 
 const playingPatternIndex = () =>
   songMode && songChain.length
@@ -118,9 +135,12 @@ function patternIsEmpty(pat) {
   );
 }
 
-// The MIDI note a row plays on a given track (scale note + octave shift).
-function trackNote(t, row) {
-  return Math.min(127, Math.max(0, rowNotes[row] + trackSettings[t].octave * 12));
+// The MIDI note a row plays on a given track (scale note + octave shift),
+// optionally snapped to its natural (white-key) pitch for a cell with the
+// natural accidental set.
+function trackNote(t, row, natural = false) {
+  const note = rowNotes[row] + trackSettings[t].octave * 12;
+  return Math.min(127, Math.max(0, natural ? naturalize(note) : note));
 }
 
 function trackNoteArrays() {
@@ -149,7 +169,11 @@ const unpackBoolGrid = (s, rows) => {
 function buildStateObject() {
   return {
     patterns: patterns.map((p) => ({
-      tracks: p.tracks.map((t) => ({ cells: packGrid(t.grid), ties: packGrid(t.tieGrid) })),
+      tracks: p.tracks.map((t) => ({
+        cells: packGrid(t.grid),
+        ties: packGrid(t.tieGrid),
+        nats: packGrid(t.natGrid),
+      })),
       drums: packGrid(p.drumGrid),
       length: p.length,
     })),
@@ -189,6 +213,7 @@ function loadPattern(saved) {
     for (let t = 0; t < Math.min(saved.tracks.length, TRACK_COUNT); t++) {
       pat.tracks[t].grid = unpackGrid(saved.tracks[t].cells, ROWS) ?? pat.tracks[t].grid;
       pat.tracks[t].tieGrid = unpackBoolGrid(saved.tracks[t].ties, ROWS) ?? pat.tracks[t].tieGrid;
+      pat.tracks[t].natGrid = unpackBoolGrid(saved.tracks[t].nats, ROWS) ?? pat.tracks[t].natGrid;
     }
   } else {
     // Single-track format: the old melody grid becomes track 1.
@@ -211,7 +236,9 @@ function loadPattern(saved) {
       }
     }
   }
-  if (PATTERN_LENGTHS.includes(saved.length)) pat.length = saved.length;
+  if (Number.isInteger(saved.length) && saved.length >= 1 && saved.length <= MAX_STEPS) {
+    pat.length = saved.length;
+  }
   return pat;
 }
 
@@ -378,7 +405,7 @@ engine.getNotesForStep = (step) => {
       if (rowAudible("melody", row) && isNoteStart(pat, t, row, step)) {
         const value = grid[row][step];
         notes.push({
-          midi: trackNote(t, row),
+          midi: trackNote(t, row, pat.tracks[t].natGrid[row][step]),
           velocity: velFor(value),
           midiVelocity: midiVelFor(value),
           durSteps: noteLength(pat, t, row, step),
@@ -514,6 +541,7 @@ function renderView() {
         el.classList.toggle("on", value > 0);
         el.classList.toggle("accent", value === 2);
         el.classList.toggle("row-muted", dim);
+        el.classList.toggle("inactive", !stepActive(step));
         if (kind === "melody") {
           const tieGrid = pat.tracks[activeTrack].tieGrid;
           const tiedRight =
@@ -522,6 +550,7 @@ function renderView() {
             value > 0 && step > 0 && tieGrid[row][step - 1] && g[row][step - 1] > 0;
           el.classList.toggle("tie-right", tiedRight);
           el.classList.toggle("tie-left", tiedLeft);
+          el.classList.toggle("natural", value > 0 && pat.tracks[activeTrack].natGrid[row][step]);
           // Ghost dot: another track has a note here (helps line layers up).
           let ghost = -1;
           for (let t = 0; t < TRACK_COUNT && ghost < 0; t++) {
@@ -557,7 +586,7 @@ function previewCell(kind, row, step) {
   } else {
     const value = pat.tracks[activeTrack].grid[row][step];
     engine.preview({
-      midi: trackNote(activeTrack, row),
+      midi: trackNote(activeTrack, row, pat.tracks[activeTrack].natGrid[row][step]),
       velocity: velFor(value),
       midiVelocity: midiVelFor(value),
       durSteps: noteLength(pat, activeTrack, row, step),
@@ -619,12 +648,32 @@ function applyDraw(info, value) {
   saveState();
 }
 
+// Natural tool: toggle the natural accidental on an existing melody note.
+function applyNatural(row, step, wantNat) {
+  const track = current().tracks[activeTrack];
+  if (!track.grid[row][step]) return; // only meaningful on a note
+  if (track.natGrid[row][step] === wantNat) return;
+  track.natGrid[row][step] = wantNat;
+  renderView();
+  previewCell("melody", row, step);
+  saveState();
+}
+
 function onPointerDown(e) {
   const info = cellInfo(e.target.closest(".cell"));
   if (!info) return;
   e.preventDefault();
+  // Ignore columns past the pattern length — they're inactive.
+  if (!stepActive(info.step)) return;
   painting = true;
   downKey = `${info.kind}:${info.row}:${info.step}`;
+
+  if (tool === "nat") {
+    if (info.kind !== "melody") return;
+    paintMode = current().tracks[activeTrack].natGrid[info.row][info.step] ? "unnat" : "nat";
+    applyNatural(info.row, info.step, paintMode === "nat");
+    return;
+  }
 
   if (tool === "tie") {
     if (info.kind !== "melody") return;
@@ -665,7 +714,7 @@ function onPointerDown(e) {
 function onPointerMove(e) {
   if (!painting) return;
   const info = cellInfo(document.elementFromPoint(e.clientX, e.clientY));
-  if (!info || `${info.kind}:${info.row}:${info.step}` === downKey) return;
+  if (!info || !stepActive(info.step) || `${info.kind}:${info.row}:${info.step}` === downKey) return;
   // Leaving the initial cell turns this into a drag: no accent, and a
   // pending toggle-off commits as the start of an erase stroke.
   cancelHold();
@@ -673,7 +722,9 @@ function onPointerMove(e) {
     applyDraw(pendingOff, 0);
     pendingOff = null;
   }
-  if (paintMode === "tie" || paintMode === "untie") {
+  if (paintMode === "nat" || paintMode === "unnat") {
+    if (info.kind === "melody") applyNatural(info.row, info.step, paintMode === "nat");
+  } else if (paintMode === "tie" || paintMode === "untie") {
     if (info.kind === "melody") applyTie(info.row, info.step, paintMode === "tie");
   } else {
     applyDraw(info, paintMode === "draw" ? 1 : 0);
@@ -790,7 +841,7 @@ function selectPattern(i, { keepFollow = false } = {}) {
   selectedPattern = i;
   if (!keepFollow && songMode) setFollow(false);
   viewPage = 0;
-  lengthSelect.value = current().length;
+  renderLength();
   rebuildPageTabs();
   renderView();
   renderPatternSlots();
@@ -840,16 +891,97 @@ songModeBtn.addEventListener("click", () => setSongMode(!songMode));
 document.getElementById("duplicate").addEventListener("click", () => {
   const target = patterns.findIndex((p) => patternIsEmpty(p));
   if (target === -1) return;
-  const src = current();
-  patterns[target] = {
-    tracks: src.tracks.map((t) => ({
-      grid: t.grid.map((r) => [...r]),
-      tieGrid: t.tieGrid.map((r) => [...r]),
-    })),
-    drumGrid: src.drumGrid.map((r) => [...r]),
-    length: src.length,
-  };
+  patterns[target] = clonePattern(current());
   selectPattern(target);
+});
+
+// ---- Copy menu: copy one part of this pattern onto another pattern --------
+
+const copyBtn = document.getElementById("copy");
+const copyMenu = document.getElementById("copy-menu");
+let copyStage = null; // { part } once a part is chosen, awaiting a destination
+
+function hideCopyMenu() {
+  copyMenu.hidden = true;
+  copyBtn.setAttribute("aria-expanded", "false");
+  copyStage = null;
+}
+
+// Copy `part` ("track0..2" | "drums" | "all") from the current pattern to `dest`.
+function copyPart(part, dest) {
+  const src = current();
+  const d = patterns[dest];
+  if (part === "all") {
+    patterns[dest] = clonePattern(src);
+  } else if (part === "drums") {
+    d.drumGrid = cloneRows(src.drumGrid);
+  } else {
+    const t = +part.slice(5);
+    d.tracks[t] = cloneTrack(src.tracks[t]);
+  }
+  hideCopyMenu();
+  selectPattern(dest);
+}
+
+function buildCopyMenu() {
+  copyMenu.replaceChildren();
+  const heading = document.createElement("div");
+  heading.className = "menu-heading";
+  if (!copyStage) {
+    heading.textContent = "Copy what?";
+    copyMenu.appendChild(heading);
+    const parts = [
+      ...Array.from({ length: TRACK_COUNT }, (_, t) => [`track${t}`, `Track ${t + 1}`]),
+      ["drums", "Drums"],
+      ["all", "Whole pattern"],
+    ];
+    for (const [part, label] of parts) {
+      const item = document.createElement("button");
+      item.className = "clear-item";
+      item.textContent = label;
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        copyStage = { part };
+        buildCopyMenu();
+      });
+      copyMenu.appendChild(item);
+    }
+  } else {
+    heading.textContent = "Copy to pattern…";
+    copyMenu.appendChild(heading);
+    const wrap = document.createElement("div");
+    wrap.className = "copy-dests";
+    for (let i = 0; i < PATTERN_COUNT; i++) {
+      const item = document.createElement("button");
+      item.className = "copy-dest";
+      item.textContent = PATTERN_NAMES[i];
+      if (i === selectedPattern) item.disabled = true;
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (patternIsEmpty(patterns[i]) || confirm(`Overwrite pattern ${PATTERN_NAMES[i]}?`)) {
+          copyPart(copyStage.part, i);
+        }
+      });
+      wrap.appendChild(item);
+    }
+    copyMenu.appendChild(wrap);
+  }
+}
+
+copyBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!copyMenu.hidden) {
+    hideCopyMenu();
+    return;
+  }
+  copyStage = null;
+  buildCopyMenu();
+  copyMenu.hidden = false;
+  copyBtn.setAttribute("aria-expanded", "true");
+});
+
+window.addEventListener("pointerdown", (e) => {
+  if (!copyMenu.hidden && !copyMenu.contains(e.target) && e.target !== copyBtn) hideCopyMenu();
 });
 
 // ---- Track mixer panel -----------------------------------------------------
@@ -1072,9 +1204,11 @@ const swingInput = document.getElementById("swing");
 const swingLabel = document.getElementById("swing-label");
 const rootSelect = document.getElementById("root");
 const scaleSelect = document.getElementById("scale");
-const lengthSelect = document.getElementById("length");
+const lengthInput = document.getElementById("length");
+const lengthLabel = document.getElementById("length-label");
 const toolDrawBtn = document.getElementById("tool-draw");
 const toolTieBtn = document.getElementById("tool-tie");
+const toolNatBtn = document.getElementById("tool-nat");
 const remapToggle = document.getElementById("remap-toggle");
 const accentInput = document.getElementById("accent");
 const accentLabel = document.getElementById("accent-label");
@@ -1218,25 +1352,42 @@ remapToggle.addEventListener("change", () => {
   saveState();
 });
 
-lengthSelect.addEventListener("change", () => {
-  current().length = +lengthSelect.value;
+function meterHint(steps) {
+  // A friendly time-signature label for common step counts (16th notes).
+  const map = { 8: "2/4", 12: "3/4", 16: "4/4", 24: "6/4", 32: "4/4 ×2", 48: "3/4 ×4", 64: "4/4 ×4" };
+  return map[steps] ? ` (${map[steps]})` : "";
+}
+
+function renderLength() {
+  const steps = current().length;
+  lengthInput.value = steps;
+  lengthLabel.textContent = `${steps} step${steps === 1 ? "" : "s"}${meterHint(steps)}`;
+}
+
+lengthInput.addEventListener("input", () => {
+  current().length = +lengthInput.value;
+  renderLength();
   if (viewPage >= pageCount()) viewPage = 0;
   rebuildPageTabs();
   renderView();
+  setPlayheadColumn(engine.playing ? drawnStep : -1);
   saveState();
 });
 
 function setTool(next) {
   tool = next;
-  toolDrawBtn.classList.toggle("active", tool === "draw");
-  toolDrawBtn.setAttribute("aria-pressed", String(tool === "draw"));
-  toolTieBtn.classList.toggle("active", tool === "tie");
-  toolTieBtn.setAttribute("aria-pressed", String(tool === "tie"));
-  document.getElementById("grid").classList.toggle("tie-mode", tool === "tie");
+  for (const [t, btn] of [["draw", toolDrawBtn], ["tie", toolTieBtn], ["nat", toolNatBtn]]) {
+    btn.classList.toggle("active", tool === t);
+    btn.setAttribute("aria-pressed", String(tool === t));
+  }
+  const grid = document.getElementById("grid");
+  grid.classList.toggle("tie-mode", tool === "tie");
+  grid.classList.toggle("nat-mode", tool === "nat");
 }
 
 toolDrawBtn.addEventListener("click", () => setTool("draw"));
 toolTieBtn.addEventListener("click", () => setTool("tie"));
+toolNatBtn.addEventListener("click", () => setTool("nat"));
 
 // ---- Clear menu ------------------------------------------------------------
 
@@ -1705,7 +1856,7 @@ function syncUI() {
   rootSelect.value = rootIndex;
   rootSelect.disabled = scaleIndex === "custom";
   scaleSelect.value = scaleIndex;
-  lengthSelect.value = current().length;
+  renderLength();
   remapToggle.checked = remapOnScaleChange;
   accentInput.value = accentBoost;
   accentLabel.textContent = `Accent +${accentBoost}%`;
