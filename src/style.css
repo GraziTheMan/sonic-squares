@@ -444,7 +444,7 @@ body {
 }
 
 .grid.tie-mode .cell,
-.grid.nat-mode .cell {
+.grid.accidental-mode .cell {
   cursor: crosshair;
 }
 
@@ -454,9 +454,9 @@ body {
   pointer-events: none;
 }
 
-/* Natural accidental: a small white ♮ on the note. */
-.cell.on.natural::before {
-  content: "♮";
+/* Chromatic offset: a small white ♭/♯ marker (with a count for ±2 or more). */
+.cell.on.shifted::before {
+  content: attr(data-off);
   position: absolute;
   top: -2%;
   left: 50%;
@@ -701,6 +701,15 @@ body {
 .btn-small {
   padding: 6px 10px;
   font-size: 0.8rem;
+}
+
+/* Square ± steppers flanking a slider, for fine tuning on small screens. */
+.btn-nudge {
+  padding: 4px 0;
+  min-width: 32px;
+  font-size: 1rem;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 .clear-wrap {

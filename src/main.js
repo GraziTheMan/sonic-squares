@@ -9,7 +9,6 @@ import {
   ROOT_CHOICES,
   buildRowNotes,
   midiNoteName,
-  naturalize,
 } from "./scale.js";
 import { DRUMS, DRUM_ROWS, defaultDrumMap } from "./drums.js";
 import { AudioEngine } from "./audio.js";
@@ -42,8 +41,10 @@ const emptyGrid = (rows, fill = 0) =>
 const emptyTrack = () => ({
   grid: emptyGrid(ROWS),
   tieGrid: emptyGrid(ROWS, false),
-  natGrid: emptyGrid(ROWS, false), // per-cell "natural" accidental
+  offGrid: emptyGrid(ROWS, 0), // per-cell chromatic offset in semitones
 });
+
+const OFFSET_LIMIT = 12; // a cell can be shifted up to an octave either way
 
 const emptyPattern = () => ({
   tracks: Array.from({ length: TRACK_COUNT }, emptyTrack),
@@ -58,7 +59,7 @@ const cloneRows = (g) => g.map((r) => [...r]);
 const cloneTrack = (t) => ({
   grid: cloneRows(t.grid),
   tieGrid: cloneRows(t.tieGrid),
-  natGrid: cloneRows(t.natGrid),
+  offGrid: cloneRows(t.offGrid),
 });
 const clonePattern = (p) => ({
   tracks: p.tracks.map(cloneTrack),
@@ -108,7 +109,7 @@ let rowNotes = currentScaleNotes();
 let viewPage = 0;
 let playingPage = 0;
 let follow = true;
-let tool = "draw"; // "draw" | "tie"
+let tool = "draw"; // "draw" | "tie" | "flat" | "sharp"
 
 // Scheduler-side song position (runs ahead of what you hear) and the
 // UI-side positions applied when the audio actually reaches them.
@@ -136,11 +137,20 @@ function patternIsEmpty(pat) {
 }
 
 // The MIDI note a row plays on a given track (scale note + octave shift),
-// optionally snapped to its natural (white-key) pitch for a cell with the
-// natural accidental set.
-function trackNote(t, row, natural = false) {
-  const note = rowNotes[row] + trackSettings[t].octave * 12;
-  return Math.min(127, Math.max(0, natural ? naturalize(note) : note));
+// plus a per-cell chromatic offset in semitones (the ♭/♯ accidental tools)
+// so a single note can sit outside the scale.
+function trackNote(t, row, offset = 0) {
+  const note = rowNotes[row] + trackSettings[t].octave * 12 + offset;
+  return Math.min(127, Math.max(0, note));
+}
+
+// Compact cell marker for a chromatic offset: ♭ / ♯ for one semitone, ♭2 / ♯3
+// for larger shifts.
+function offsetLabel(off) {
+  if (!off) return "";
+  const sym = off < 0 ? "♭" : "♯";
+  const n = Math.abs(off);
+  return n === 1 ? sym : sym + n;
 }
 
 function trackNoteArrays() {
@@ -165,6 +175,22 @@ const unpackBoolGrid = (s, rows) => {
   const g = unpackGrid(s, rows);
   return g ? g.map((row) => row.map((v) => v === 1)) : null;
 };
+// Signed per-cell integer grid (chromatic offsets), comma-separated per row so
+// multi-digit and negative values round-trip.
+const packIntGrid = (g) => g.map((row) => row.map((c) => c | 0).join(",")).join("|");
+const unpackIntGrid = (s, rows) => {
+  const parsed = (s || "").split("|");
+  if (parsed.length !== rows) return null;
+  return parsed.map((r) => {
+    const out = Array(MAX_STEPS).fill(0);
+    const vals = r ? r.split(",") : [];
+    for (let i = 0; i < Math.min(vals.length, MAX_STEPS); i++) {
+      const v = Math.round(+vals[i] || 0);
+      out[i] = Math.min(OFFSET_LIMIT, Math.max(-OFFSET_LIMIT, v));
+    }
+    return out;
+  });
+};
 
 function buildStateObject() {
   return {
@@ -172,7 +198,7 @@ function buildStateObject() {
       tracks: p.tracks.map((t) => ({
         cells: packGrid(t.grid),
         ties: packGrid(t.tieGrid),
-        nats: packGrid(t.natGrid),
+        offs: packIntGrid(t.offGrid),
       })),
       drums: packGrid(p.drumGrid),
       length: p.length,
@@ -213,7 +239,15 @@ function loadPattern(saved) {
     for (let t = 0; t < Math.min(saved.tracks.length, TRACK_COUNT); t++) {
       pat.tracks[t].grid = unpackGrid(saved.tracks[t].cells, ROWS) ?? pat.tracks[t].grid;
       pat.tracks[t].tieGrid = unpackBoolGrid(saved.tracks[t].ties, ROWS) ?? pat.tracks[t].tieGrid;
-      pat.tracks[t].natGrid = unpackBoolGrid(saved.tracks[t].nats, ROWS) ?? pat.tracks[t].natGrid;
+      // Current saves store signed offsets; older saves stored a "natural"
+      // boolean — a set flag means "drop a semitone", i.e. offset -1.
+      const offs = unpackIntGrid(saved.tracks[t].offs, ROWS);
+      if (offs) {
+        pat.tracks[t].offGrid = offs;
+      } else {
+        const nats = unpackBoolGrid(saved.tracks[t].nats, ROWS);
+        if (nats) pat.tracks[t].offGrid = nats.map((row) => row.map((v) => (v ? -1 : 0)));
+      }
     }
   } else {
     // Single-track format: the old melody grid becomes track 1.
@@ -405,7 +439,7 @@ engine.getNotesForStep = (step) => {
       if (rowAudible("melody", row) && isNoteStart(pat, t, row, step)) {
         const value = grid[row][step];
         notes.push({
-          midi: trackNote(t, row, pat.tracks[t].natGrid[row][step]),
+          midi: trackNote(t, row, pat.tracks[t].offGrid[row][step]),
           velocity: velFor(value),
           midiVelocity: midiVelFor(value),
           durSteps: noteLength(pat, t, row, step),
@@ -550,7 +584,11 @@ function renderView() {
             value > 0 && step > 0 && tieGrid[row][step - 1] && g[row][step - 1] > 0;
           el.classList.toggle("tie-right", tiedRight);
           el.classList.toggle("tie-left", tiedLeft);
-          el.classList.toggle("natural", value > 0 && pat.tracks[activeTrack].natGrid[row][step]);
+          const off = pat.tracks[activeTrack].offGrid[row][step];
+          const shifted = value > 0 && off !== 0;
+          el.classList.toggle("shifted", shifted);
+          if (shifted) el.dataset.off = offsetLabel(off);
+          else delete el.dataset.off;
           // Ghost dot: another track has a note here (helps line layers up).
           let ghost = -1;
           for (let t = 0; t < TRACK_COUNT && ghost < 0; t++) {
@@ -586,7 +624,7 @@ function previewCell(kind, row, step) {
   } else {
     const value = pat.tracks[activeTrack].grid[row][step];
     engine.preview({
-      midi: trackNote(activeTrack, row, pat.tracks[activeTrack].natGrid[row][step]),
+      midi: trackNote(activeTrack, row, pat.tracks[activeTrack].offGrid[row][step]),
       velocity: velFor(value),
       midiVelocity: midiVelFor(value),
       durSteps: noteLength(pat, activeTrack, row, step),
@@ -607,10 +645,11 @@ function previewCell(kind, row, step) {
 // its right-hand neighbour.
 
 let painting = false;
-let paintMode = null; // "draw" | "erase" | "tie" | "untie"
+let paintMode = null; // "draw" | "erase" | "tie" | "untie" | "flat" | "sharp"
 let holdTimer = null;
 let pendingOff = null; // cell awaiting toggle-off on pointerup
 let downKey = null; // "kind:row:step" of the initial cell
+let lastAdjustKey = null; // last cell an accidental stroke touched (avoids re-nudging)
 
 const cellInfo = (target) => {
   if (!target?.classList?.contains("cell")) return null;
@@ -648,12 +687,14 @@ function applyDraw(info, value) {
   saveState();
 }
 
-// Natural tool: toggle the natural accidental on an existing melody note.
-function applyNatural(row, step, wantNat) {
+// Accidental tools: nudge an existing melody note by `delta` semitones,
+// accumulating (so repeated taps go ±2, ±3…) up to the offset limit.
+function adjustOffset(row, step, delta) {
   const track = current().tracks[activeTrack];
   if (!track.grid[row][step]) return; // only meaningful on a note
-  if (track.natGrid[row][step] === wantNat) return;
-  track.natGrid[row][step] = wantNat;
+  const next = Math.min(OFFSET_LIMIT, Math.max(-OFFSET_LIMIT, track.offGrid[row][step] + delta));
+  if (next === track.offGrid[row][step]) return;
+  track.offGrid[row][step] = next;
   renderView();
   previewCell("melody", row, step);
   saveState();
@@ -668,10 +709,11 @@ function onPointerDown(e) {
   painting = true;
   downKey = `${info.kind}:${info.row}:${info.step}`;
 
-  if (tool === "nat") {
+  if (tool === "flat" || tool === "sharp") {
     if (info.kind !== "melody") return;
-    paintMode = current().tracks[activeTrack].natGrid[info.row][info.step] ? "unnat" : "nat";
-    applyNatural(info.row, info.step, paintMode === "nat");
+    paintMode = tool;
+    lastAdjustKey = downKey;
+    adjustOffset(info.row, info.step, tool === "flat" ? -1 : 1);
     return;
   }
 
@@ -722,8 +764,12 @@ function onPointerMove(e) {
     applyDraw(pendingOff, 0);
     pendingOff = null;
   }
-  if (paintMode === "nat" || paintMode === "unnat") {
-    if (info.kind === "melody") applyNatural(info.row, info.step, paintMode === "nat");
+  if (paintMode === "flat" || paintMode === "sharp") {
+    const key = `${info.kind}:${info.row}:${info.step}`;
+    if (info.kind === "melody" && key !== lastAdjustKey) {
+      lastAdjustKey = key;
+      adjustOffset(info.row, info.step, paintMode === "flat" ? -1 : 1);
+    }
   } else if (paintMode === "tie" || paintMode === "untie") {
     if (info.kind === "melody") applyTie(info.row, info.step, paintMode === "tie");
   } else {
@@ -1208,7 +1254,8 @@ const lengthInput = document.getElementById("length");
 const lengthLabel = document.getElementById("length-label");
 const toolDrawBtn = document.getElementById("tool-draw");
 const toolTieBtn = document.getElementById("tool-tie");
-const toolNatBtn = document.getElementById("tool-nat");
+const toolFlatBtn = document.getElementById("tool-flat");
+const toolSharpBtn = document.getElementById("tool-sharp");
 const remapToggle = document.getElementById("remap-toggle");
 const accentInput = document.getElementById("accent");
 const accentLabel = document.getElementById("accent-label");
@@ -1272,12 +1319,17 @@ playBtn.addEventListener("click", () => {
   }
 });
 
-bpmInput.addEventListener("input", () => {
-  bpm = +bpmInput.value;
+function setBpm(value) {
+  bpm = Math.min(240, Math.max(40, Math.round(value)));
   engine.bpm = bpm;
+  bpmInput.value = bpm;
   bpmLabel.textContent = `${bpm} BPM`;
   saveState();
-});
+}
+
+bpmInput.addEventListener("input", () => setBpm(+bpmInput.value));
+document.getElementById("bpm-down").addEventListener("click", () => setBpm(bpm - 1));
+document.getElementById("bpm-up").addEventListener("click", () => setBpm(bpm + 1));
 
 swingInput.addEventListener("input", () => {
   swing = +swingInput.value;
@@ -1302,17 +1354,20 @@ function remapPatterns(oldNotes, newNotes) {
     for (const track of pat.tracks) {
       const newGrid = emptyGrid(ROWS);
       const newTies = emptyGrid(ROWS, false);
+      const newOffs = emptyGrid(ROWS, 0);
       for (let row = 0; row < ROWS; row++) {
         const nr = rowMap[row];
         for (let step = 0; step < MAX_STEPS; step++) {
           if (track.grid[row][step]) {
             newGrid[nr][step] = Math.max(newGrid[nr][step], track.grid[row][step]);
+            if (track.offGrid[row][step]) newOffs[nr][step] = track.offGrid[row][step];
           }
           if (track.tieGrid[row][step]) newTies[nr][step] = true;
         }
       }
       track.grid = newGrid;
       track.tieGrid = newTies;
+      track.offGrid = newOffs;
     }
   }
 }
@@ -1364,30 +1419,41 @@ function renderLength() {
   lengthLabel.textContent = `${steps} step${steps === 1 ? "" : "s"}${meterHint(steps)}`;
 }
 
-lengthInput.addEventListener("input", () => {
-  current().length = +lengthInput.value;
+function setLength(value) {
+  const v = Math.min(MAX_STEPS, Math.max(1, Math.round(value)));
+  current().length = v;
   renderLength();
   if (viewPage >= pageCount()) viewPage = 0;
   rebuildPageTabs();
   renderView();
   setPlayheadColumn(engine.playing ? drawnStep : -1);
   saveState();
-});
+}
+
+lengthInput.addEventListener("input", () => setLength(+lengthInput.value));
+document.getElementById("length-down").addEventListener("click", () => setLength(current().length - 1));
+document.getElementById("length-up").addEventListener("click", () => setLength(current().length + 1));
 
 function setTool(next) {
   tool = next;
-  for (const [t, btn] of [["draw", toolDrawBtn], ["tie", toolTieBtn], ["nat", toolNatBtn]]) {
+  for (const [t, btn] of [
+    ["draw", toolDrawBtn],
+    ["tie", toolTieBtn],
+    ["flat", toolFlatBtn],
+    ["sharp", toolSharpBtn],
+  ]) {
     btn.classList.toggle("active", tool === t);
     btn.setAttribute("aria-pressed", String(tool === t));
   }
   const grid = document.getElementById("grid");
   grid.classList.toggle("tie-mode", tool === "tie");
-  grid.classList.toggle("nat-mode", tool === "nat");
+  grid.classList.toggle("accidental-mode", tool === "flat" || tool === "sharp");
 }
 
 toolDrawBtn.addEventListener("click", () => setTool("draw"));
 toolTieBtn.addEventListener("click", () => setTool("tie"));
-toolNatBtn.addEventListener("click", () => setTool("nat"));
+toolFlatBtn.addEventListener("click", () => setTool("flat"));
+toolSharpBtn.addEventListener("click", () => setTool("sharp"));
 
 // ---- Clear menu ------------------------------------------------------------
 

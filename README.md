@@ -7,8 +7,9 @@ got: **MIDI and WAV export**, multiple tracks, a full drum kit, and
 Google Play; built as a web app wrapped with Capacitor.
 
 - 16-row melody grid: rows are pitches on the selected scale, columns are
-  16th-note steps. Patterns can be 16, 32, or 64 steps, paged 16 columns at a
-  time with a follow-the-playhead mode.
+  16th-note steps. A **Steps** slider sets any pattern length from 1 to 64
+  (12 = 3/4, 16 = 4/4, and so on for partial measures and odd meters); the
+  grid pages 16 columns at a time with a follow-the-playhead mode.
 - **Three melody tracks** play simultaneously, color-coded (cyan, green,
   pink) with ghost dots showing the other tracks' notes while you edit.
   Each track has its own **instrument** (bell, music box, marimba, plucked
@@ -39,13 +40,20 @@ Google Play; built as a web app wrapped with Capacitor.
   song chain, scale (custom included), drum mapping, tempo, swing.
 - Web Audio synth with a lookahead scheduler for tight, drift-free timing.
 - Tempo control (40–240 BPM) and swing (50–75%, applied to playback and
-  export alike); patterns and settings auto-save to `localStorage`.
+  export alike); the tempo and steps sliders each have − / + steppers for
+  one-at-a-time fine tuning on small screens. Patterns and settings auto-save
+  to `localStorage`.
 - Press and hold a cell to accent it (higher velocity, brighter glow); hold
   again to un-accent.
 - A **Tie tool** joins a melody note to its right-hand neighbour, merging
   runs of cells into single sustained notes — by choice, so repeated 16ths
   stay repeated unless you tie them. Tied notes sustain in the synth and
   export as one long MIDI note.
+- **Flat (♭) and Sharp (♯) tools** nudge a single melody note off the scale:
+  each tap lowers or raises it a semitone and taps accumulate (up to an
+  octave either way), so a scale that's perfect except for one transition
+  note still works. A small ♭/♯ marker shows the shift, and it carries
+  through playback, MIDI, and WAV export.
 - **Twelve pattern slots (A–L)** with one-tap switching, a Duplicate button,
   and a **song mode**: chain patterns in any order (tap + to append the
   selected pattern, tap a chip to remove it) and the chain plays — and

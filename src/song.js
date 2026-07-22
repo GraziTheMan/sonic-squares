@@ -2,8 +2,8 @@
 // pattern segments (played back to back) into note events on a global step
 // timeline, merging tied melody runs and skipping muted rows and tracks.
 
-// segments: [{ tracks: [{ grid, tieGrid }], drumGrid, steps }]
-// Returns { melody: [{ track, step, durSteps, row, value }],
+// segments: [{ tracks: [{ grid, tieGrid, offGrid }], drumGrid, steps }]
+// Returns { melody: [{ track, step, durSteps, row, value, offset }],
 //           drums:  [{ step, row, value }], totalSteps }
 export function collectSong(segments, { melodyAudible, drumAudible, trackAudible }) {
   const melody = [];
@@ -13,7 +13,7 @@ export function collectSong(segments, { melodyAudible, drumAudible, trackAudible
     const { tracks, drumGrid, steps } = seg;
     for (let t = 0; t < tracks.length; t++) {
       if (trackAudible && !trackAudible[t]) continue;
-      const { grid, tieGrid, natGrid } = tracks[t];
+      const { grid, tieGrid, offGrid } = tracks[t];
       for (let row = 0; row < grid.length; row++) {
         if (!melodyAudible[row]) continue;
         let step = 0;
@@ -30,7 +30,7 @@ export function collectSong(segments, { melodyAudible, drumAudible, trackAudible
             durSteps: end - step + 1,
             row,
             value: grid[row][step],
-            natural: !!natGrid?.[row][step],
+            offset: offGrid?.[row][step] || 0,
           });
           step = end + 1;
         }

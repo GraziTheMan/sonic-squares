@@ -21,8 +21,10 @@
           <div class="btn-group" role="group" aria-label="Edit tool">
             <button id="tool-draw" class="btn active" aria-pressed="true">Draw</button>
             <button id="tool-tie" class="btn" aria-pressed="false">Tie</button>
-            <button id="tool-nat" class="btn" aria-pressed="false"
-              title="Natural: snap a note to its natural (white-key) pitch">Nat</button>
+            <button id="tool-flat" class="btn" aria-pressed="false"
+              title="Flat: tap a note to lower it a semitone (tap again for more)">&flat;</button>
+            <button id="tool-sharp" class="btn" aria-pressed="false"
+              title="Sharp: tap a note to raise it a semitone (tap again for more)">&sharp;</button>
           </div>
           <div class="clear-wrap">
             <button id="clear" class="btn" aria-haspopup="true" aria-expanded="false">Clear&hellip;</button>
@@ -73,10 +75,12 @@
       <details class="settings" id="song-panel">
         <summary>Song</summary>
         <div class="panel-row">
-          <label class="slider">
+          <div class="slider">
             <span id="bpm-label">120 BPM</span>
+            <button type="button" id="bpm-down" class="btn btn-nudge" aria-label="Decrease BPM">&minus;</button>
             <input id="bpm" type="range" min="40" max="240" step="1" value="120" />
-          </label>
+            <button type="button" id="bpm-up" class="btn btn-nudge" aria-label="Increase BPM">+</button>
+          </div>
           <label class="slider">
             <span id="swing-label">Swing 50%</span>
             <input id="swing" type="range" min="50" max="75" step="1" value="50" />
@@ -91,11 +95,13 @@
             <button id="oct-up" class="btn btn-small" aria-label="Octave up">+</button>
           </div>
         </div>
-        <label class="slider setting-slider">
+        <div class="slider setting-slider">
           <span id="length-label">16 steps (4/4)</span>
+          <button type="button" id="length-down" class="btn btn-nudge" aria-label="Fewer steps">&minus;</button>
           <input id="length" type="range" min="1" max="64" step="1" value="16"
             title="Steps per pattern (16th notes): 12 = 3/4, 16 = 4/4" />
-        </label>
+          <button type="button" id="length-up" class="btn btn-nudge" aria-label="More steps">+</button>
+        </div>
         <p class="settings-note">
           Steps per pattern (16th notes). Shorten for partial measures or
           other meters — the playhead wraps early and moves to the next
@@ -168,8 +174,10 @@
             several at once. <b>Press and hold</b> a note to accent it (louder);
             hold again to un-accent. The top tools switch what a tap does:
             <b>Draw</b> places notes, <b>Tie</b> joins a note to its right-hand
-            neighbour into one longer note, and <b>Nat</b> snaps a note to its
-            natural (white-key) pitch when you need one note outside the scale.
+            neighbour into one longer note, and <b>&flat;</b> / <b>&sharp;</b>
+            nudge a note down or up a semitone each tap (tap again to go
+            further, ±&nbsp;up to an octave) for a note outside the scale. A
+            small ♭/♯ marker shows any note you've shifted.
           </p>
           <h3>Tracks &amp; drums</h3>
           <p>
@@ -188,7 +196,9 @@
             <b>+</b> to chain patterns into a full arrangement. <b>Follow</b>
             makes the view track what's playing. In the <b>Song</b> panel, the
             <b>Steps</b> slider sets how long a pattern is (12 = 3/4, 16 = 4/4,
-            etc.) — shorten it for partial measures.
+            etc.) — shorten it for partial measures. The <b>&minus;</b> /
+            <b>+</b> buttons beside the tempo and steps sliders nudge them one
+            step at a time for fine tuning.
           </p>
           <h3>Panels</h3>
           <p>

@@ -9,6 +9,16 @@ note that beside each entry so you can match a Play upload to a commit.
 
 ---
 
+## v0.1.x — Flat & Sharp tools, fine-tune steppers
+
+```
+• New ♭ and ♯ tools: tap a note to bend it a semitone below or above the
+  scale, and tap again to go further — perfect for one out-of-key note.
+• New − / + buttons beside the Tempo and Steps sliders for fine tuning on
+  small screens.
+• The old Nat button is now ♭/♯; any notes you'd made natural become flats.
+```
+
 ## v0.1.x — Meter, naturals, copy
 
 ```
